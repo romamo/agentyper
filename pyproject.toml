@@ -35,6 +35,10 @@ Homepage = "https://github.com/romamo/agentyper"
 Repository = "https://github.com/romamo/agentyper"
 Issues = "https://github.com/romamo/agentyper/issues"
 
+[project.scripts]
+agentyper = "agentyper.cli:main"
+
+
 [tool.uv]
 dev-dependencies = [
     "ruff",
