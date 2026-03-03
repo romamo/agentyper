@@ -1,0 +1,74 @@
+[project]
+name = "agentyper"
+version = "0.1.0"
+description = "Agent-first Python CLI library — Typer-compatible, built on argparse + pydantic"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Roman Medvedev", email = "pypi@romavm.dev" }
+]
+license = { text = "MIT" }
+keywords = ["cli", "agent", "ai", "pydantic", "argparse", "typer"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Terminals",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "rich>=13.0.0",
+]
+
+[project.optional-dependencies]
+completion = ["argcomplete>=3.0.0"]
+
+[project.urls]
+Homepage = "https://github.com/romamo/agentyper"
+Repository = "https://github.com/romamo/agentyper"
+Issues = "https://github.com/romamo/agentyper/issues"
+
+[tool.uv]
+dev-dependencies = [
+    "ruff",
+    "pytest>=8.0.0",
+    "mypy>=1.15.0",
+    "bandit>=1.8.3",
+    "pytest-cov>=6.0.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PLC", "PLE"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agentyper"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+]
+exclude = [
+    "/.agent",
+    "/.github",
+    "/uv.lock",
+    "/tmp",
+]
