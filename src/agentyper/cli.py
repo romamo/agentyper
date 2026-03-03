@@ -34,36 +34,43 @@ def _load_module(path: str) -> Any:
     return module
 
 
-def _extract_app(module: Any) -> agentyper.Agentyper | None:
+def _execute_module(module: Any, target_args: list[str], module_name: str) -> None:
     # 1. Look for Agentyper instance
     for attr_name in dir(module):
         if attr_name.startswith("_"):
             continue
         attr = getattr(module, attr_name)
         if isinstance(attr, agentyper.Agentyper):
-            return attr
+            attr(target_args)
+            return
 
-    # 2. Look for main() method
+    # 2. Extract functions
+    funcs = []
     if hasattr(module, "main") and inspect.isfunction(module.main):
-        target_app = agentyper.Agentyper()
-        target_app.command()(module.main)
-        return target_app
+        funcs.append(module.main)
+    else:
+        for attr_name in dir(module):
+            if attr_name.startswith("_"):
+                continue
+            attr = getattr(module, attr_name)
+            if inspect.isfunction(attr) and attr.__module__ == module.__name__:
+                funcs.append(attr)
 
-    # 3. Expose all public functions
-    target_app = agentyper.Agentyper()
-    found = False
-    for attr_name in dir(module):
-        if attr_name.startswith("_"):
-            continue
-        attr = getattr(module, attr_name)
-        if inspect.isfunction(attr) and attr.__module__ == module.__name__:
-            target_app.command(name=attr_name.replace("_", "-"))(attr)
-            found = True
+    if not funcs:
+        agentyper.echo("Error: Could not find a valid Agentyper app or function to run.", err=True)
+        sys.exit(1)
 
-    if found:
-        return target_app
+    if len(funcs) == 1:
+        # Run as a single-command app
+        agentyper.run(funcs[0], args=target_args, prog=module_name)
+        return
 
-    return None
+    # Run as a multi-command app
+    target_app = agentyper.Agentyper(name=module_name)
+    for f in funcs:
+        target_app.command(name=f.__name__.replace("_", "-"))(f)
+
+    target_app(target_args)
 
 
 @app.callback(invoke_without_command=True)
@@ -80,7 +87,10 @@ def callback(
 def run() -> None:
     """Run the provided Agentyper app."""
     # This command handles parsing `run` in help, but execution is intercepted below.
-    agentyper.echo("Error: Please provide a script to run. Usage: agentyper [PATH_OR_MODULE] run ...", err=True)
+    agentyper.echo(
+        "Error: Please provide a script to run. Usage: agentyper [PATH_OR_MODULE] run ...",  # noqa: E501
+        err=True,
+    )
     sys.exit(1)
 
 
@@ -95,12 +105,7 @@ def main() -> None:
         sys.argv = [path_or_module] + target_args
 
         module = _load_module(path_or_module)
-        target_app = _extract_app(module)
-        if target_app is None:
-            agentyper.echo("Error: Could not find a valid Agentyper app or function to run.", err=True)
-            sys.exit(1)
-
-        target_app(target_args)
+        _execute_module(module, target_args, module_name=Path(path_or_module).stem)
         return
 
     # Fallback to standard app (renders help)
