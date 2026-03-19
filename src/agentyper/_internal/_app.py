@@ -211,6 +211,9 @@ class Agentyper:
             subparsers.required = not self.invoke_without_command
 
             for cmd_name, cmd_info in self._commands.items():
+                def _cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
+                    return fn_to_input_schema(ci.fn)
+
                 sub = subparsers.add_parser(
                     cmd_name,
                     help=cmd_info.help,
@@ -219,7 +222,7 @@ class Agentyper:
                 )
                 self._inject_global_flags(
                     sub,
-                    schema_fn=lambda ci=cmd_info: fn_to_input_schema(ci.fn),  # type: ignore[misc]
+                    schema_fn=_cmd_schema_fn,
                 )
                 self._add_fn_params(sub, cmd_info.fn)
                 if cmd_info.mutating:
@@ -252,10 +255,13 @@ class Agentyper:
             subparsers = parent.add_subparsers(dest="_command", metavar="COMMAND")
             subparsers.required = True
             for cmd_name, cmd_info in self._commands.items():
+                def _sub_cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
+                    return fn_to_input_schema(ci.fn)
+
                 sub = subparsers.add_parser(cmd_name, help=cmd_info.help)
                 self._inject_global_flags(
                     sub,
-                    schema_fn=lambda ci=cmd_info: fn_to_input_schema(ci.fn),  # type: ignore[misc]
+                    schema_fn=_sub_cmd_schema_fn,
                 )
                 self._add_fn_params(sub, cmd_info.fn)
                 sub.set_defaults(_cmd_info=cmd_info, _callbacks=my_callbacks)
@@ -321,10 +327,7 @@ class Agentyper:
         fn: Callable,
     ) -> None:
         """Introspect a function signature and add its parameters to the parser."""
-        try:
-            hints = get_type_hints(fn)
-        except Exception:
-            hints = {}
+        hints = get_type_hints(fn)
 
         sig = inspect.signature(fn)
         _skip = {  # fmt: off
@@ -599,15 +602,7 @@ def _make_type_fn(annotation: Any) -> Callable:
 def _call_fn(
     fn: Callable, ns: argparse.Namespace, format_: str, ctx: Context | None = None
 ) -> None:
-    """
-    Call a command function, passing only the parameters it declares.
-
-    Catches Pydantic ValidationError and exits with structured errors.
-    """
-    try:
-        hints = get_type_hints(fn)
-    except Exception:
-        hints = {}  # noqa: F841 — kept for potential future use
+    # _ = get_type_hints(fn)
 
     sig = inspect.signature(fn)
     _skip = {  # noqa: E501

@@ -93,7 +93,8 @@ def _render_table(records: list[dict[str, Any]], title: str) -> None:
 
 def _render_json(records: list[dict[str, Any]]) -> None:
     """Render JSON to stdout."""
-    print(json.dumps(records if len(records) != 1 else records[0], default=_default_json, indent=2))
+    output_data = records if len(records) != 1 else records[0]
+    print(json.dumps(output_data, default=_default_json, indent=2, ensure_ascii=False))
 
 
 def _render_csv(records: list[dict[str, Any]]) -> None:

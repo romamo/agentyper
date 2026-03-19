@@ -21,11 +21,8 @@ def _slugify(text: str) -> str:
 
 def _annotation_to_json_schema(annotation: Any) -> dict[str, Any]:
     """Convert a Python type annotation to a JSON Schema dict via pydantic TypeAdapter."""
-    try:
-        ta = TypeAdapter(annotation)
-        return ta.json_schema(mode="serialization")
-    except Exception:
-        return {"type": "string"}
+    ta = TypeAdapter(annotation)
+    return ta.json_schema(mode="serialization")
 
 
 def fn_to_input_schema(fn: Callable) -> dict[str, Any]:
@@ -40,10 +37,7 @@ def fn_to_input_schema(fn: Callable) -> dict[str, Any]:
     Returns:
         A dict compatible with JSON Schema draft 2020-12 ``type: object``.
     """
-    try:
-        hints = get_type_hints(fn)
-    except Exception:
-        hints = {}
+    hints = get_type_hints(fn)
 
     sig = inspect.signature(fn)
     properties: dict[str, Any] = {}
@@ -91,20 +85,14 @@ def fn_return_schema(fn: Callable) -> dict[str, Any] | None:
 
     Returns ``None`` if no annotation is present or it cannot be resolved.
     """
-    try:
-        hints = get_type_hints(fn)
-    except Exception:
-        return None
+    hints = get_type_hints(fn)
 
     ret = hints.get("return")
     if ret is None:
         return None
 
-    try:
-        ta = TypeAdapter(ret)
-        return ta.json_schema(mode="serialization")
-    except Exception:
-        return None
+    ta = TypeAdapter(ret)
+    return ta.json_schema(mode="serialization")
 
 
 def build_app_schema(

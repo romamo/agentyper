@@ -88,7 +88,7 @@ def run() -> None:
     """Run the provided Agentyper app."""
     # This command handles parsing `run` in help, but execution is intercepted below.
     agentyper.echo(
-        "Error: Please provide a script to run. Usage: agentyper [PATH_OR_MODULE] run ...",  # noqa: E501
+        "Error: Please provide a script to run. Usage: agentyper [PATH_OR_MODULE] run ...",
         err=True,
     )
     sys.exit(1)
