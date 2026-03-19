@@ -211,6 +211,7 @@ class Agentyper:
             subparsers.required = not self.invoke_without_command
 
             for cmd_name, cmd_info in self._commands.items():
+
                 def _cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
                     return fn_to_input_schema(ci.fn)
 
@@ -255,6 +256,7 @@ class Agentyper:
             subparsers = parent.add_subparsers(dest="_command", metavar="COMMAND")
             subparsers.required = True
             for cmd_name, cmd_info in self._commands.items():
+
                 def _sub_cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
                     return fn_to_input_schema(ci.fn)
 
