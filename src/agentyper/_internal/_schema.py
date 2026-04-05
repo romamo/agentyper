@@ -9,9 +9,10 @@ from typing import Any, get_type_hints
 
 from pydantic import TypeAdapter
 
+from agentyper._internal._errors import EXIT_CODE_TABLE
 from agentyper._internal._params import ArgumentInfo, OptionInfo
 
-_GLOBAL_PARAMS = {"format_", "schema", "yes", "no", "answers", "verbose", "version"}
+_GLOBAL_PARAMS = {"format_", "schema", "yes", "no", "answers", "verbose", "version", "_timeout_ms"}
 
 
 def _slugify(text: str) -> str:
@@ -60,6 +61,8 @@ def fn_to_input_schema(fn: Callable) -> dict[str, Any]:
         if isinstance(default, (OptionInfo, ArgumentInfo)):
             if default.has_default and default.default is not ...:
                 schema["default"] = default.default
+            else:
+                required.append(name)
             help_text = default.help or ""
         elif default is inspect.Parameter.empty or default is ...:
             required.append(name)
@@ -113,23 +116,66 @@ def build_app_schema(
     Returns:
         A JSON-serialisable schema dict.
     """
+    exit_codes = {
+        str(code): {
+            "name": entry.name,
+            "description": entry.description,
+            "retryable": entry.retryable,
+            "side_effects": entry.side_effects,
+        }
+        for code, entry in EXIT_CODE_TABLE.items()
+    }
     schema: dict[str, Any] = {
         "name": name,
         "commands": {},
+        "exit_codes": exit_codes,
     }
     if version:
         schema["version"] = version
 
     for cmd_name, cmd_info in commands.items():
+        input_schema = fn_to_input_schema(cmd_info.fn)
+        if cmd_info.mutating:
+            input_schema = {
+                **input_schema,
+                "properties": {
+                    **input_schema["properties"],
+                    "dry_run": {
+                        "type": "boolean",
+                        "default": False,
+                        "description": "Print without writing",
+                    },
+                    "idempotency_key": {
+                        "type": "string",
+                        "description": (
+                            "Caller-supplied key; duplicate calls with the same key"
+                            " return the original result without re-executing"
+                        ),
+                    },
+                },
+            }
         entry: dict[str, Any] = {
             "description": inspect.cleandoc(cmd_info.fn.__doc__ or ""),
-            "input_schema": fn_to_input_schema(cmd_info.fn),
+            "input_schema": input_schema,
+            "danger_level": cmd_info.danger_level,
+            "exit_codes": {
+                str(int(code)): {
+                    "name": e.name,
+                    "description": e.description,
+                    "retryable": e.retryable,
+                    "side_effects": e.side_effects,
+                }
+                for code, e in sorted(cmd_info.exit_codes.items())
+            },
         }
         ret = fn_return_schema(cmd_info.fn)
         if ret is not None:
             entry["output_schema"] = ret
         if cmd_info.mutating:
             entry["mutating"] = True
+        if cmd_info.requires_editor:
+            entry["requires_editor"] = True
+            entry["non_interactive_alternatives"] = cmd_info.non_interactive_alternatives
         schema["commands"][cmd_name] = entry
 
     for sub_name, sub_app in sub_apps.items():

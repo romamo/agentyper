@@ -405,11 +405,11 @@ App-level `--schema` returns the full command tree. Zero-config.
 
 **P2 — Deterministic & Non-Blocking Execution:** `--yes`/`--no` global confirm bypass.
 `--answers '{"confirms":[...],"prompts":[]}'` for multi-step flows. `--answers -` for piped input.
-`AGENTER_YES`, `AGENTER_ANSWERS` environment overrides. All interactive functions resolve
+`AGENTYPER_YES`, `AGENTYPER_ANSWERS` environment overrides. All interactive functions resolve
 non-blocking in non-TTY without additional code in command implementations.
 
 **P3 — Structured Outputs:** `--format json|csv|table` on every command. `isatty()` auto-detection
-defaults to JSON in piped/non-TTY, table in terminal. `AGENTER_FORMAT` env override. `output(data)`
+defaults to JSON in piped/non-TTY, table in terminal. `AGENTYPER_FORMAT` env override. `output(data)`
 routes through format context — commands call `output()` once and the framework handles rendering.
 
 **P4 — Actionable Structured Errors:** Pydantic `ValidationError` caught and reformatted as:
@@ -754,5 +754,5 @@ Maps every challenge to the frameworks that address it, and the concrete gap to 
 
 ---
 
-*Generated: 2026-03-10 | beancount-cli v0.2.7 | agentyper v0.1.4*
+*Generated: 2026-04-04 | agentyper v0.1.6*
 *References: agent_dx_cli_scale.md (v2, 9 axes, 0–27), agent_cli_requirements.md (P1–P6), DX-P5 Composable Structured Pipes, DX-P7 Retry & Recovery Hints*

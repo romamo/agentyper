@@ -15,8 +15,12 @@ Typer revolutionized CLI development by elegantly using type hints. However, bec
 With a one-line switch (`import agentyper as typer`), your CLI instantly yields OpenAPI/JSON schemas, strict Pydantic structured errors, and deterministic programmatic overrides for interactive features.
 
 📖 **Learn more in our docs:**
+* **[For Agents: How to use an agentyper CLI](docs/for-agents.md)** — schema discovery, format flags, error JSON, bypass flags
+* **[For Developers: Building agent-friendly CLIs](docs/for-developers.md)** — best practices, output patterns, testing
 * **[Agent Requirements for CLI Tools](docs/agent_cli_requirements.md)**
 * **[Why Agentyper? (Alternatives & Comparison Matrix)](docs/why_agentyper.md)**
+
+> agentyper implements the **[CLI Agent Spec](https://github.com/romamo/cli-agent-spec)** — a formal specification for agent-ergonomic CLI tools.
 
 ## Install
 
@@ -92,6 +96,9 @@ my-tool search AAPL --format json # structured JSON output
 my-tool delete alice --yes        # skip confirm() in agent mode
 my-tool wizard --answers '{"confirms":[true],"prompts":["Alice","admin"]}'
 ```
+
+**If you are an agent consuming an agentyper CLI, read [docs/for-agents.md](docs/for-agents.md)** for schema discovery, error handling, and the full flag reference.  
+**If you are building a CLI with agentyper, read [docs/for-developers.md](docs/for-developers.md)** for patterns, best practices, and a pre-ship checklist.
 
 ## Agent Ergonomics
 

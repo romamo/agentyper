@@ -3,7 +3,7 @@ Interactive session context and resolution hierarchy for agentyper.
 
 Every interactive call (confirm, prompt, edit) resolves through this hierarchy:
   1. Explicit flag (--yes / --no / named param in --answers)
-  2. Environment variable (AGENTER_YES, AGENTER_ANSWERS)
+  2. Environment variable (AGENTYPER_YES, AGENTYPER_ANSWERS)
   3. Pre-supplied answers queue (from --answers JSON)
   4. Default value (if provided)
   5. TTY (ask the human if sys.stdin.isatty())
@@ -55,7 +55,7 @@ class InteractiveSession:
 
         # Fallback to environment variable
         if answers_raw is None:
-            answers_raw = os.getenv("AGENTER_ANSWERS")
+            answers_raw = os.getenv("AGENTYPER_ANSWERS")
 
         if answers_raw:
             session._load_answers(answers_raw)
@@ -97,7 +97,7 @@ class InteractiveSession:
             return False
 
         # 2. Env override
-        env = os.getenv("AGENTER_YES")
+        env = os.getenv("AGENTYPER_YES")
         if env == "1":
             return True
         if env == "0":

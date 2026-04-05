@@ -51,9 +51,12 @@ from agentyper._internal._app import (
 
 # Errors
 from agentyper._internal._errors import (
+    EXIT_CODE_TABLE,
     EXIT_SUCCESS,
     EXIT_SYSTEM,
     EXIT_VALIDATION,
+    ExitCode,
+    ExitCodeEntry,
     exit_error,
     format_pydantic_error,
 )
@@ -70,9 +73,14 @@ from agentyper._internal._interactive import (
 
 # Output
 from agentyper._internal._output import (
+    add_warning,
     echo,
+    external_data,
     output,
     render_output,
+    result,
+    set_pagination,
+    warn_truncated,
 )
 
 # Parameters
@@ -81,6 +89,7 @@ from agentyper._internal._params import (
     ArgumentInfo,
     Option,
     OptionInfo,
+    ResourceId,
 )
 
 # Schema (public API)
@@ -98,10 +107,16 @@ __all__ = [
     "Argument",
     "OptionInfo",
     "ArgumentInfo",
+    "ResourceId",
     # Output
+    "add_warning",
     "echo",
+    "external_data",
     "output",
     "render_output",
+    "result",
+    "set_pagination",
+    "warn_truncated",
     # Interactive
     "confirm",
     "prompt",
@@ -110,6 +125,9 @@ __all__ = [
     "pager",
     "launch",
     # Errors
+    "ExitCode",
+    "ExitCodeEntry",
+    "EXIT_CODE_TABLE",
     "exit_error",
     "format_pydantic_error",
     "EXIT_SUCCESS",

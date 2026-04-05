@@ -3,7 +3,65 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Any
+
+# ---------------------------------------------------------------------------
+# Agent hallucination input patterns (REQ-F-045, REQ-F-044)
+# ---------------------------------------------------------------------------
+
+_HALLUCINATION_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (
+        re.compile(r"\.\.[\\/]|\.\.%2[fF]|\.\.%5[cC]|%2[eE]%2[eE][\\/]", re.IGNORECASE),
+        "path_traversal",
+    ),
+    (re.compile(r"%2[eEfF]|%5[cC]", re.IGNORECASE), "percent_encoded_separator"),
+    (re.compile(r"[?&]"), "query_parameter"),
+    (re.compile(r"#"), "fragment_identifier"),
+    (re.compile(r"[;\n\r`$|<>()]"), "shell_metacharacter"),
+]
+
+
+def check_hallucination_patterns(value: str, arg_name: str) -> str:
+    """
+    Validate a resource ID / path string against known agent hallucination patterns.
+
+    Raises SystemExit(ARG_ERROR) if a pattern matches.
+    Returns the value unchanged if all checks pass.
+    """
+    # Import lazily to avoid circular imports
+    from agentyper._internal._errors import ExitCode, exit_error  # noqa: PLC0415
+
+    for pattern, name in _HALLUCINATION_PATTERNS:
+        if pattern.search(value):
+            exit_error(
+                f"Argument '{arg_name}' contains a rejected hallucination pattern",
+                code=ExitCode.ARG_ERROR,
+                error_type="INVALID_AGENT_INPUT",
+                field=arg_name,
+                constraint=f"rejected_pattern: {name}",
+                hint=(
+                    f"Value '{value[:40]}' matched pattern '{name}'."
+                    " Check for encoding or injection."
+                ),
+                format_="json",
+            )
+    return value
+
+
+class ResourceId(str):
+    """
+    Type annotation for resource identifier arguments.
+
+    The framework automatically validates against agent hallucination patterns
+    (path traversal, percent-encoded separators, query strings, shell metacharacters)
+    when this type is used as a parameter annotation. Use it wherever a command
+    accepts an opaque ID from the caller::
+
+        def get(contact_id: ResourceId = Argument(...)):
+            ...
+    """
+
 
 _MISSING = object()
 

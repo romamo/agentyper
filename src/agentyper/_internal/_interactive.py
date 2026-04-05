@@ -27,7 +27,7 @@ from typing import Any, TypeVar
 from rich.console import Console as _RichConsole
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from agentyper._internal._errors import EXIT_VALIDATION, exit_error
+from agentyper._internal._errors import EXIT_VALIDATION, ExitCode, exit_error
 from agentyper._internal._output import echo
 from agentyper._internal._session import get_session
 
@@ -70,8 +70,9 @@ def confirm(text: str, default: bool = False) -> bool:
     # Non-TTY and no bypass — error with actionable hint
     exit_error(
         f"confirm('{text[:50]}') requires TTY or --yes/--no/--answers flag.",
-        code=EXIT_VALIDATION,
-        error_type="InteractiveRequired",
+        code=ExitCode.PRECONDITION,
+        error_type="INPUT_REQUIRED",
+        hint="Pass --yes to confirm or --no to cancel without a terminal.",
         format_="json" if not sys.stderr.isatty() else "table",
     )
 
@@ -102,6 +103,7 @@ def prompt(
     *,
     hide_input: bool = False,
     confirmation_prompt: bool = False,
+    alternatives: list[str] | None = None,
 ) -> Any:
     """
     Prompt the user for a value.
@@ -159,10 +161,15 @@ def prompt(
     if default is not None:
         return default
 
+    action_hint = "Pass --answers with a JSON payload to provide input without a terminal."
+    if alternatives:
+        flags = " or ".join(f"--{a}" for a in alternatives)
+        action_hint = f"Pass {flags} to provide input without a terminal."
     exit_error(
         f"prompt('{text[:50]}') requires TTY or --answers flag.",
-        code=EXIT_VALIDATION,
-        error_type="InteractiveRequired",
+        code=ExitCode.PRECONDITION,
+        error_type="INPUT_REQUIRED",
+        hint=action_hint,
         format_="json" if not sys.stderr.isatty() else "table",
     )
 
@@ -199,8 +206,8 @@ def edit(text: str = "", extension: str = ".txt") -> str:
 
     exit_error(
         "edit() requires a terminal editor or pre-supplied content via --answers.",
-        code=EXIT_VALIDATION,
-        error_type="InteractiveRequired",
+        code=ExitCode.PRECONDITION,
+        error_type="INPUT_REQUIRED",
     )
 
 

@@ -93,7 +93,12 @@ class TestOutputFormat:
         app = make_search_app()
         result = runner.invoke(app, ["search", "AAPL", "--format", "json"])
         assert result.exit_code == 0
-        data = json.loads(result.stdout)
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"] is True
+        assert envelope["error"] is None
+        assert isinstance(envelope["warnings"], list)
+        assert "duration_ms" in envelope["meta"]
+        data = envelope["data"]
         assert isinstance(data, list)
         assert data[0]["ticker"] == "AAPL"
 
@@ -344,3 +349,106 @@ class TestAdvancedFeatures:
         res = runner.invoke(app, ["sub", "cmd"])
         assert res.exit_code == 0
         assert calls == ["root", "sub", "cmd"]
+
+    def test_list_parameter(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        received = []
+
+        @app.command()
+        def cmd(tags: list[str]) -> None:
+            """Accept a list."""
+            received.extend(tags)
+
+        res = runner.invoke(app, ["cmd", '["a", "b", "c"]'])
+        assert res.exit_code == 0
+        assert received == ["a", "b", "c"]
+
+    def test_dry_run_flag(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        calls = []
+
+        @app.command(mutating=True)
+        def delete(name: str, dry_run: bool = False) -> None:
+            """Delete something."""
+            calls.append(dry_run)
+
+        res = runner.invoke(app, ["delete", "alice", "--dry-run"])
+        assert res.exit_code == 0
+        assert calls == [True]
+
+    def test_dry_run_in_schema(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command(mutating=True)
+        def delete(name: str) -> None:
+            """Delete something."""
+
+        schema = app.get_schema()
+        assert "dry_run" in schema["commands"]["delete"]["input_schema"]["properties"]
+        assert schema["commands"]["delete"]["mutating"] is True
+
+    def test_danger_level_in_schema(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def read(name: str) -> None:
+            """Read something."""
+
+        @app.command(mutating=True)
+        def write(name: str) -> None:
+            """Write something."""
+
+        @app.command(danger_level="destructive")
+        def nuke(name: str) -> None:
+            """Nuke something."""
+
+        schema = app.get_schema()
+        assert schema["commands"]["read"]["danger_level"] == "safe"
+        assert schema["commands"]["write"]["danger_level"] == "mutating"
+        assert schema["commands"]["nuke"]["danger_level"] == "destructive"
+
+    def test_exit_codes_in_command_schema(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd(name: str) -> None:
+            """A command."""
+
+        schema = app.get_schema()
+        cmd_schema = schema["commands"]["cmd"]
+        assert "exit_codes" in cmd_schema
+        assert "0" in cmd_schema["exit_codes"]
+        assert cmd_schema["exit_codes"]["0"]["name"] == "SUCCESS"
+
+    def test_required_option_in_schema(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd(api_key: str = agentyper.Option(..., help="API key")) -> None:
+            """Needs a key."""
+
+        schema = app.get_schema()
+        assert "api_key" in schema["commands"]["cmd"]["input_schema"]["required"]
+
+    def test_pydantic_validation_error_exits_one(self) -> None:
+        from pydantic import BaseModel, field_validator  # noqa: PLC0415
+
+        class Input(BaseModel):
+            value: int
+
+            @field_validator("value")
+            @classmethod
+            def must_be_positive(cls, v: int) -> int:
+                if v <= 0:
+                    raise ValueError("must be positive")
+                return v
+
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd(value: int) -> None:
+            """Validate."""
+            Input(value=value)
+
+        res = runner.invoke(app, ["cmd", "0"])
+        assert res.exit_code == agentyper.EXIT_VALIDATION

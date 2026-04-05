@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.7] - 2026-04-05
+
+### Added
+- **Idempotency support** (`--idempotency-key`): mutating/destructive commands deduplicate calls within a session (REQ-C-007).
+- **Per-invocation timeout** (`--timeout`): SIGALRM-based wall-clock timeout with structured JSON cancellation response (REQ-F-011).
+- **SIGTERM handler**: emits partial JSON cancellation envelope and exits 143 on SIGTERM (REQ-F-013).
+- **SIGPIPE handler**: exits cleanly when the consumer closes the pipe (REQ-F-014).
+- **CI auto-format**: `--format json` is applied automatically when `CI=true` or `NO_COLOR` is set (REQ-F-003).
+- **Help to stderr in non-TTY** (`_HelpAction`): `--help` output is routed to stderr when stdout is not a TTY (REQ-F-048).
+- **ResourceId type**: parameter annotation that auto-validates against agent hallucination patterns (path traversal, shell metacharacters, percent-encoding, etc.) (REQ-F-044/045).
+- **Structured exit codes**: `ExitCode`, `ExitCodeEntry`, `EXIT_CODE_TABLE` are now public API; per-command exit code declarations via `exit_codes=` on `@app.command()`.
+- **New output helpers**: `result()`, `add_warning()`, `warn_truncated()`, `external_data()`, `set_pagination()` added to public API.
+- **Contacts example app**: full CRUD contacts CLI under `examples/contacts/` demonstrating ResourceId, mutating commands, and idempotency.
+- **Agent and developer docs**: `docs/for-agents.md` and `docs/for-developers.md` added.
+- **CI workflow**: GitHub Actions `ci.yml` for lint, test, and build on every push.
+
+### Fixed
+- **Code quality**: replaced bare `try/except/pass` with `contextlib.suppress`; fixed import ordering; resolved all ruff warnings across the codebase.
+
 ## [0.1.6] - 2026-03-19
 
 ### Fixed

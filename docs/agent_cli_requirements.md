@@ -1,5 +1,8 @@
 # Agent Requirements for Execution CLI Tools
 
+> These requirements are formalized as the **[CLI Agent Spec](https://github.com/romamo/cli-agent-spec)**.  
+> agentyper is the reference Python implementation of that specification.
+
 When Large Language Models (LLMs) or AI Agents interact with command-line interfaces, they behave very differently than human operators. To be "Agent-Ready," a CLI tool must satisfy these fundamental requirements:
 
 ## 1. Schema Introspection (Discoverability)
