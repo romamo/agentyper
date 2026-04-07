@@ -421,7 +421,32 @@ class Agentyper:
                     schema_fn=_sub_cmd_schema_fn,
                 )
                 self._add_fn_params(sub, cmd_info.fn)
+                if cmd_info.mutating:
+                    sub.add_argument(
+                        "--dry-run",
+                        action="store_true",
+                        default=False,
+                        help="Print without writing",
+                    )
+                    sub.add_argument(
+                        "--idempotency-key",
+                        default=None,
+                        metavar="KEY",
+                        dest="idempotency_key",
+                        help=(
+                            "Caller-supplied key; duplicate calls with the same key"
+                            " return the original result (REQ-C-007)"
+                        ),
+                    )
                 sub.set_defaults(_cmd_info=cmd_info, _callbacks=my_callbacks)
+
+            for sub_name, sub_app in self._sub_apps.items():
+                sub = subparsers.add_parser(
+                    sub_name,
+                    help=sub_app.help or "",
+                    add_help=False,
+                )
+                sub_app._mount_into(sub, callbacks=my_callbacks)
 
     def _inject_global_flags(
         self,
@@ -599,10 +624,21 @@ class Agentyper:
                 default_val = env_val
 
         kwargs: dict[str, Any] = {"help": info.help}
-        if has_default and default_val is not ...:
-            kwargs["nargs"] = "?"
-            kwargs["default"] = default_val
-        kwargs["type"] = _make_type_fn(annotation)
+
+        inner = _list_inner_type(annotation)
+        if inner is not None:
+            # Variadic positional: list[T] → nargs="+" (required) or nargs="*" (optional)
+            required = not has_default or default_val is ...
+            kwargs["nargs"] = "+" if required else "*"
+            kwargs["type"] = _make_type_fn(inner)
+            if has_default and default_val not in (..., None):
+                kwargs["default"] = default_val
+        else:
+            if has_default and default_val is not ...:
+                kwargs["nargs"] = "?"
+                kwargs["default"] = default_val
+            kwargs["type"] = _make_type_fn(annotation)
+
         if info.metavar:
             kwargs["metavar"] = info.metavar
         parser.add_argument(param_name, **kwargs)
@@ -903,6 +939,19 @@ def _load_json(raw: str, message: str) -> Any:
         return json.loads(raw)
     except json.JSONDecodeError as e:
         raise argparse.ArgumentTypeError(message) from e
+
+
+def _list_inner_type(annotation: Any) -> Any | None:
+    """Return the inner type if annotation is list[T] or List[T], else None."""
+    origin = getattr(annotation, "__origin__", None)
+    if origin is typing.Union:
+        args = [a for a in annotation.__args__ if a is not type(None)]
+        if args:
+            return _list_inner_type(args[0])
+    if origin in (list, collections.abc.Sequence):
+        type_args = getattr(annotation, "__args__", None)
+        return type_args[0] if type_args else str
+    return None
 
 
 def _make_type_fn(annotation: Any) -> Callable:

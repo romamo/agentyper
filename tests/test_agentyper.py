@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import agentyper
 from agentyper.testing import CliRunner
@@ -363,6 +364,50 @@ class TestAdvancedFeatures:
         assert res.exit_code == 0
         assert received == ["a", "b", "c"]
 
+    def test_variadic_argument_required(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        received: list[str] = []
+
+        @app.command()
+        def cmd(files: list[str] = agentyper.Argument(...)) -> None:
+            """Accept variadic files."""
+            received.extend(files)
+
+        res = runner.invoke(app, ["cmd", "a.txt", "b.txt", "c.txt"])
+        assert res.exit_code == 0
+        assert received == ["a.txt", "b.txt", "c.txt"]
+
+    def test_variadic_argument_optional(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        received: list[str] = []
+
+        @app.command()
+        def cmd(files: list[str] = agentyper.Argument(None)) -> None:
+            """Accept optional variadic files."""
+            if files:
+                received.extend(files)
+
+        res = runner.invoke(app, ["cmd", "x.txt", "y.txt"])
+        assert res.exit_code == 0
+        assert received == ["x.txt", "y.txt"]
+
+        res_empty = runner.invoke(app, ["cmd"])
+        assert res_empty.exit_code == 0
+        assert received == ["x.txt", "y.txt"]  # no change
+
+    def test_variadic_argument_typed(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        received: list[Path] = []
+
+        @app.command()
+        def cmd(files: list[Path] = agentyper.Argument(...)) -> None:
+            """Accept variadic Path files."""
+            received.extend(files)
+
+        res = runner.invoke(app, ["cmd", "f1.txt", "f2.txt"])
+        assert res.exit_code == 0
+        assert received == [Path("f1.txt"), Path("f2.txt")]
+
     def test_dry_run_flag(self) -> None:
         app = agentyper.Agentyper(name="app")
         calls = []
@@ -373,6 +418,22 @@ class TestAdvancedFeatures:
             calls.append(dry_run)
 
         res = runner.invoke(app, ["delete", "alice", "--dry-run"])
+        assert res.exit_code == 0
+        assert calls == [True]
+
+    def test_dry_run_flag_in_sub_app(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        sub = agentyper.Agentyper(name="price")
+        calls: list[bool] = []
+
+        @sub.command(mutating=True)
+        def fetch(symbol: str, dry_run: bool = False) -> None:
+            """Fetch price."""
+            calls.append(dry_run)
+
+        app.add_agentyper(sub, name="price")
+
+        res = runner.invoke(app, ["price", "fetch", "AAPL", "--dry-run"])
         assert res.exit_code == 0
         assert calls == [True]
 
