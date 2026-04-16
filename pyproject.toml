@@ -1,6 +1,6 @@
 [project]
 name = "agentyper"
-version = "0.1.10"
+version = "0.1.11"
 description = "Agent-first Python CLI library — Typer-compatible, built on argparse + pydantic"
 readme = "README.md"
 requires-python = ">=3.10"

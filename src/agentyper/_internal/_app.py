@@ -505,6 +505,7 @@ class Agentyper:
         my_callbacks = callbacks.copy()
         if self._callback_fn:
             my_callbacks.append(self._callback_fn)
+        self._add_callback_params(parser, my_callbacks)
 
         if self._commands or self._sub_apps:
             subparsers = parser.add_subparsers(
@@ -527,7 +528,9 @@ class Agentyper:
                 self._inject_global_flags(
                     sub,
                     schema_fn=_cmd_schema_fn,
+                    suppress_defaults=True,
                 )
+                self._add_callback_params(sub, my_callbacks, suppress_defaults=True)
                 self._add_fn_params(sub, cmd_info.fn)
                 if cmd_info.mutating:
                     sub.add_argument(
@@ -560,10 +563,11 @@ class Agentyper:
 
     def _mount_into(self, parent: argparse.ArgumentParser, callbacks: list[Callable]) -> None:
         """Mount this app's commands into an existing subparser slot."""
-        self._inject_global_flags(parent, schema_fn=self.get_schema)
+        self._inject_global_flags(parent, schema_fn=self.get_schema, suppress_defaults=True)
         my_callbacks = callbacks.copy()
         if self._callback_fn:
             my_callbacks.append(self._callback_fn)
+        self._add_callback_params(parent, my_callbacks, suppress_defaults=True)
 
         if self._commands or self._sub_apps:
             subparsers = parent.add_subparsers(dest="_command", metavar="COMMAND")
@@ -577,7 +581,9 @@ class Agentyper:
                 self._inject_global_flags(
                     sub,
                     schema_fn=_sub_cmd_schema_fn,
+                    suppress_defaults=True,
                 )
+                self._add_callback_params(sub, my_callbacks, suppress_defaults=True)
                 self._add_fn_params(sub, cmd_info.fn)
                 if cmd_info.mutating:
                     sub.add_argument(
@@ -610,6 +616,8 @@ class Agentyper:
         self,
         parser: argparse.ArgumentParser,
         schema_fn: Callable[[], dict[str, Any]],
+        *,
+        suppress_defaults: bool = False,
     ) -> None:
         """Add the standard agentyper global flags to a parser."""
         # -h / --help (REQ-F-048: routes to stderr in non-TTY)
@@ -634,24 +642,31 @@ class Agentyper:
         parser.add_argument(
             "--format",
             choices=["table", "json", "csv"],
-            default=env_format,
+            default=argparse.SUPPRESS if suppress_defaults else env_format,
             metavar="FORMAT",
             help="Output format: table (default in TTY), json, csv",
         )
 
         # --yes / --no
         parser.add_argument(
-            "--yes", "-y", action="store_true", default=False, help="Auto-confirm all prompts"
+            "--yes",
+            "-y",
+            action="store_true",
+            default=argparse.SUPPRESS if suppress_defaults else False,
+            help="Auto-confirm all prompts",
         )
         parser.add_argument(
-            "--no", action="store_true", default=False, help="Auto-deny all confirm() calls"
+            "--no",
+            action="store_true",
+            default=argparse.SUPPRESS if suppress_defaults else False,
+            help="Auto-deny all confirm() calls",
         )
 
         # --answers
         parser.add_argument(
             "--answers",
             "-a",
-            default=None,
+            default=argparse.SUPPRESS if suppress_defaults else None,
             metavar="JSON",
             help="JSON string, file path, or '-' for STDIN with interactive answers",
         )
@@ -660,7 +675,7 @@ class Agentyper:
         parser.add_argument(
             "--timeout",
             type=int,
-            default=0,
+            default=argparse.SUPPRESS if suppress_defaults else 0,
             dest="_timeout_ms",
             metavar="MS",
             help="Wall-clock timeout in milliseconds (0 = use framework default)",
@@ -668,7 +683,11 @@ class Agentyper:
 
         # -v / -vv verbosity
         parser.add_argument(
-            "-v", action="count", default=0, dest="verbose", help="Verbose (-v INFO, -vv DEBUG)"
+            "-v",
+            action="count",
+            default=argparse.SUPPRESS if suppress_defaults else 0,
+            dest="verbose",
+            help="Verbose (-v INFO, -vv DEBUG)",
         )
 
         # --version
@@ -679,10 +698,23 @@ class Agentyper:
                 version=f"{self.name or 'agentyper'} {self.version}",
             )
 
+    def _add_callback_params(
+        self,
+        parser: argparse.ArgumentParser,
+        callbacks: list[Callable],
+        *,
+        suppress_defaults: bool = False,
+    ) -> None:
+        """Add callback function parameters to a parser."""
+        for callback in callbacks:
+            self._add_fn_params(parser, callback, suppress_defaults=suppress_defaults)
+
     def _add_fn_params(
         self,
         parser: argparse.ArgumentParser,
         fn: Callable,
+        *,
+        suppress_defaults: bool = False,
     ) -> None:
         """Introspect a function signature and add its parameters to the parser."""
         hints = get_type_hints(fn)
@@ -705,7 +737,13 @@ class Agentyper:
             default = param.default
 
             if isinstance(default, OptionInfo):
-                self._add_option(parser, param_name, annotation, default)
+                self._add_option(
+                    parser,
+                    param_name,
+                    annotation,
+                    default,
+                    suppress_defaults=suppress_defaults,
+                )
             elif isinstance(default, ArgumentInfo):
                 self._add_argument(parser, param_name, annotation, default)
             elif default is inspect.Parameter.empty or default is ...:
@@ -715,9 +753,17 @@ class Agentyper:
                 # Plain default → optional flag
                 flag_name = f"--{param_name.replace('_', '-')}"
                 if annotation is bool:
-                    parser.add_argument(flag_name, action="store_true", default=default)
+                    parser.add_argument(
+                        flag_name,
+                        action="store_true",
+                        default=argparse.SUPPRESS if suppress_defaults else default,
+                    )
                 else:
-                    parser.add_argument(flag_name, type=_make_type_fn(annotation), default=default)
+                    parser.add_argument(
+                        flag_name,
+                        type=_make_type_fn(annotation),
+                        default=argparse.SUPPRESS if suppress_defaults else default,
+                    )
 
     def _add_option(
         self,
@@ -725,6 +771,8 @@ class Agentyper:
         param_name: str,
         annotation: Any,
         info: OptionInfo,
+        *,
+        suppress_defaults: bool = False,
     ) -> None:
         """Add an OptionInfo-described parameter to the parser."""
         # Determine flag names
@@ -746,16 +794,18 @@ class Agentyper:
         if annotation is bool or info.is_flag:
             kwargs["action"] = "store_true"
             if isinstance(default_val, str):
-                kwargs["default"] = default_val.lower() not in ("0", "false", "no", "n")
+                default_bool = default_val.lower() not in ("0", "false", "no", "n")
+                kwargs["default"] = argparse.SUPPRESS if suppress_defaults else default_bool
             else:
-                kwargs["default"] = default_val if has_default else False
+                resolved_default = default_val if has_default else False
+                kwargs["default"] = argparse.SUPPRESS if suppress_defaults else resolved_default
         else:
             kwargs["type"] = _make_type_fn(annotation)
             if has_default and default_val not in (..., None):
-                kwargs["default"] = default_val
+                kwargs["default"] = argparse.SUPPRESS if suppress_defaults else default_val
                 if info.show_default:
                     kwargs["help"] += f" [default: {default_val}]"
-            elif not has_default or default_val is ...:
+            elif not suppress_defaults and (not has_default or default_val is ...):
                 kwargs["required"] = True
             if info.metavar:
                 kwargs["metavar"] = info.metavar

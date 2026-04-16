@@ -364,6 +364,54 @@ class TestAdvancedFeatures:
             "root_verbose": 2,
         }
 
+    def test_callback_option_before_subcommand_is_parsed(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        seen: list[bool] = []
+
+        @app.callback()
+        def cb(enabled: bool = agentyper.Option(False, "--enabled", is_flag=True)) -> None:
+            seen.append(enabled)
+
+        @app.command()
+        def cmd() -> None:
+            pass
+
+        res = runner.invoke(app, ["--enabled", "cmd"])
+        assert res.exit_code == 0
+        assert seen == [True]
+
+    def test_callback_option_after_subcommand_is_parsed(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        seen: list[bool] = []
+
+        @app.callback()
+        def cb(enabled: bool = agentyper.Option(False, "--enabled", is_flag=True)) -> None:
+            seen.append(enabled)
+
+        @app.command()
+        def cmd() -> None:
+            pass
+
+        res = runner.invoke(app, ["cmd", "--enabled"])
+        assert res.exit_code == 0
+        assert seen == [True]
+
+    def test_global_format_before_subcommand_survives_subparser_defaults(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        seen: dict[str, str] = {}
+
+        @app.callback()
+        def cb(ctx: agentyper.Context) -> None:
+            seen["callback"] = ctx.format_
+
+        @app.command()
+        def cmd(ctx: agentyper.Context) -> None:
+            seen["command"] = ctx.format_
+
+        res = runner.invoke(app, ["--format", "table", "cmd"])
+        assert res.exit_code == 0
+        assert seen == {"callback": "table", "command": "table"}
+
     def test_get_current_context_is_available_to_helpers(self) -> None:
         app = agentyper.Agentyper(name="app")
         seen: dict[str, object] = {}
