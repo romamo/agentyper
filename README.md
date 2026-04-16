@@ -165,12 +165,41 @@ def sync(ctx: agentyper.Context, target: str):
     agentyper.output({"target": target, "format": ctx.format})
 ```
 
+Use this rule of thumb:
+
+- Pass `ctx` explicitly when the function is part of the command flow and invocation state is an important dependency.
+- Call `agentyper.get_current_context()` in deep helper code that needs invocation-scoped state without forcing `ctx` through unrelated layers.
+- If helper code may run outside an active CLI invocation, either accept `ctx` explicitly or handle the `RuntimeError` raised by `get_current_context()`.
+
+`agentyper.Context` exposes:
+
+- `ctx.runtime` for resolved framework state such as format, verbosity, answers, and timeout.
+- `ctx.params` for parsed command parameters.
+- `ctx.root` for resolved global/root flags.
+- `ctx.obj` for app-owned mutable shared state.
+
 Helper code can also read the active invocation context without manually threading it through every call:
 
 ```python
 def build_client(ctx: agentyper.Context | None = None) -> Client:
     ctx = ctx or agentyper.get_current_context()
     return Client(timeout_ms=ctx.runtime.timeout_ms, verbose=ctx.runtime.verbosity > 0)
+```
+
+This hybrid pattern works well for reusable helpers and tests:
+
+```python
+def emit_success(
+    payload: dict,
+    ctx: agentyper.Context | None = None,
+) -> None:
+    ctx = ctx or agentyper.get_current_context()
+    agentyper.output(payload, format_=ctx.format_)
+
+
+@app.command()
+def run(ctx: agentyper.Context) -> None:
+    emit_success({"status": "ok"}, ctx=ctx)
 ```
 
 ## License

@@ -167,7 +167,51 @@ def setup() -> None:
 
 ---
 
-## 7. Provide meaningful `help=` strings
+## 7. Choose the right context pattern
+
+Commands and callbacks can accept `ctx: agentyper.Context` directly:
+
+```python
+@app.command()
+def sync(ctx: agentyper.Context, target: str) -> None:
+    client = build_client(ctx)
+    agentyper.output({"target": target, "format": ctx.format})
+```
+
+Use this rule of thumb:
+
+- Pass `ctx` explicitly when invocation state is a meaningful dependency of the function.
+- Use `agentyper.get_current_context()` in deep helper layers that need invocation-scoped state but would otherwise force `ctx` through unrelated call chains.
+- If the helper may run outside a live CLI invocation, prefer an optional `ctx` argument or handle the `RuntimeError` from `get_current_context()`.
+
+`agentyper.Context` is intentionally split by responsibility:
+
+- `ctx.runtime` contains framework-resolved state such as format, verbosity, answers, and timeout.
+- `ctx.params` contains parsed command parameters.
+- `ctx.root` contains global/root flags.
+- `ctx.obj` is mutable shared state owned by the application.
+
+A practical hybrid pattern keeps command dependencies explicit while still making deep helpers easy to reuse and test:
+
+```python
+def emit_success(
+    payload: dict,
+    ctx: agentyper.Context | None = None,
+) -> None:
+    ctx = ctx or agentyper.get_current_context()
+    agentyper.output(payload, format_=ctx.format_)
+
+
+@app.command()
+def run(ctx: agentyper.Context) -> None:
+    emit_success({"status": "ok"}, ctx=ctx)
+```
+
+This keeps helpers convenient without turning invocation state into a hidden dependency everywhere.
+
+---
+
+## 8. Provide meaningful `help=` strings
 
 The `help` text on `Option()` and `Argument()` appears as `description` in the JSON Schema. Agents use this to understand what a field means — treat it like API documentation, not UI copy.
 
@@ -182,7 +226,7 @@ api_key: str = Option(..., help="API key from Settings > Developer. Required for
 
 ---
 
-## 8. Name commands and flags consistently
+## 9. Name commands and flags consistently
 
 Follow Unix conventions and the [CLI Agent Spec](https://github.com/romamo/cli-agent-spec) naming rules:
 
@@ -193,7 +237,7 @@ Follow Unix conventions and the [CLI Agent Spec](https://github.com/romamo/cli-a
 
 ---
 
-## 9. Add version to your app
+## 10. Add version to your app
 
 ```python
 app = agentyper.Agentyper(name="my-tool", version="1.2.0")
@@ -203,7 +247,7 @@ This enables `my-tool --version` and populates `"version"` in `--schema`. Agents
 
 ---
 
-## 10. Testing agent paths
+## 11. Testing agent paths
 
 Use `agentyper.testing.CliRunner` to test all agent-relevant paths:
 
