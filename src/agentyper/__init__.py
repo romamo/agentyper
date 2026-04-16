@@ -46,6 +46,7 @@ from agentyper._internal._app import (
     BadParameter,
     Context,
     Exit,
+    get_current_context,
     run,
 )
 
@@ -141,6 +142,7 @@ __all__ = [
     "Abort",
     "BadParameter",
     "Context",
+    "get_current_context",
     # Version
     "__version__",
 ]

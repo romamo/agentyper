@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import collections.abc
 import contextlib
+import contextvars
 import dataclasses
 import inspect
 import json
@@ -31,6 +32,7 @@ import signal
 import sys
 import typing
 from collections.abc import Callable
+from types import MappingProxyType
 from pathlib import Path
 from typing import Any, get_type_hints
 
@@ -69,6 +71,10 @@ _DangerLevel = str  # "safe" | "mutating" | "destructive"
 
 # Session-scoped idempotency cache: "{cmd_name}:{key}" → raw result dict (REQ-C-007)
 _idempotency_cache: dict[str, dict[str, Any]] = {}
+_current_context: contextvars.ContextVar[Context | None] = contextvars.ContextVar(
+    "agentyper_current_context",
+    default=None,
+)
 
 
 def _default_exit_codes(danger_level: _DangerLevel) -> dict[int, ExitCodeEntry]:
@@ -84,6 +90,23 @@ def _default_exit_codes(danger_level: _DangerLevel) -> dict[int, ExitCodeEntry]:
         base[ExitCode.PRECONDITION] = EXIT_CODE_TABLE[ExitCode.PRECONDITION]
         base[ExitCode.CONFLICT] = EXIT_CODE_TABLE[ExitCode.CONFLICT]
     return base
+
+
+def get_current_context() -> Context:
+    """Return the active invocation context for the current task/thread."""
+    ctx = _current_context.get()
+    if ctx is None:
+        raise RuntimeError("No active agentyper invocation context")
+    return ctx
+
+
+@contextlib.contextmanager
+def _use_context(ctx: Context) -> typing.Iterator[None]:
+    token = _current_context.set(ctx)
+    try:
+        yield
+    finally:
+        _current_context.reset(token)
 
 
 @dataclasses.dataclass
@@ -197,6 +220,141 @@ class _SchemaPrintAction(argparse.Action):
     ) -> None:
         print(json.dumps(self._schema_fn(), indent=2))
         parser.exit(EXIT_SUCCESS)
+
+
+# ---------------------------------------------------------------------------
+# Invocation context
+# ---------------------------------------------------------------------------
+
+
+@dataclasses.dataclass(frozen=True)
+class RuntimeInfo:
+    """Resolved framework-managed state for the active invocation."""
+
+    format: str = "table"
+    verbosity: int = 0
+    timeout_ms: int = 0
+    answers: str | None = None
+    auto_yes: bool = False
+    auto_no: bool = False
+
+
+class RootParams(collections.abc.Mapping[str, Any]):
+    """Read-only attribute/mapping view of resolved root/global parameters."""
+
+    def __init__(self, values: dict[str, Any]) -> None:
+        self._values = MappingProxyType(dict(values))
+
+    def __getitem__(self, key: str) -> Any:
+        return self._values[key]
+
+    def __iter__(self) -> collections.abc.Iterator[str]:
+        return iter(self._values)
+
+    def __len__(self) -> int:
+        return len(self._values)
+
+    def __getattr__(self, name: str) -> Any:
+        try:
+            return self._values[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a plain dict copy for serialization or debugging."""
+        return dict(self._values)
+
+
+class Context:
+    """Invocation-scoped context shared across callbacks, commands, and helpers."""
+
+    def __init__(
+        self,
+        *,
+        app_name: str | None = None,
+        command_name: str | None = None,
+        runtime: RuntimeInfo | None = None,
+        root: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
+        obj: dict[str, Any] | None = None,
+    ) -> None:
+        self.app_name = app_name
+        self.command_name = command_name
+        self.runtime = runtime or RuntimeInfo()
+        self.root = RootParams(root or {})
+        self.globals = self.root
+        self.params = RootParams(params or {})
+        self.obj = obj if obj is not None else {}
+
+    @property
+    def format(self) -> str:
+        return self.runtime.format
+
+    @property
+    def format_(self) -> str:
+        """Compatibility alias for Typer-style code."""
+        return self.runtime.format
+
+    @property
+    def verbose(self) -> int:
+        return self.runtime.verbosity
+
+    @property
+    def yes(self) -> bool:
+        return self.runtime.auto_yes
+
+    @property
+    def no(self) -> bool:
+        return self.runtime.auto_no
+
+    @property
+    def answers(self) -> str | None:
+        return self.runtime.answers
+
+    @property
+    def timeout_ms(self) -> int:
+        return self.runtime.timeout_ms
+
+
+def _build_context(
+    *,
+    ns: argparse.Namespace,
+    format_: str,
+    timeout_ms: int,
+    app_name: str | None,
+    command_name: str | None,
+    obj: dict[str, Any] | None = None,
+) -> Context:
+    """Build the invocation context from resolved argparse state."""
+    root = {
+        "format": format_,
+        "verbose": getattr(ns, "verbose", 0),
+        "yes": getattr(ns, "yes", False),
+        "no": getattr(ns, "no", False),
+        "answers": getattr(ns, "answers", None),
+        "timeout_ms": timeout_ms,
+    }
+    params = {
+        key: value
+        for key, value in vars(ns).items()
+        if key not in (_GLOBAL_PARAMS | {"_command", "_cmd_info", "_callbacks", "idempotency_key"})
+        and not key.startswith("_")
+    }
+    return Context(
+        app_name=app_name,
+        command_name=command_name,
+        runtime=RuntimeInfo(
+            format=format_,
+            verbosity=root["verbose"],
+            timeout_ms=timeout_ms,
+            answers=root["answers"],
+            auto_yes=root["yes"],
+            auto_no=root["no"],
+        ),
+        root=root,
+        params=params,
+        obj=obj,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -675,46 +833,57 @@ class Agentyper:
         if not cmd_info and not callbacks and self._callback_fn:
             callbacks = [self._callback_fn]
 
-        ctx = Context(format_=format_)
-
-        for cb in callbacks:
-            _call_fn(cb, ns, format_, ctx=ctx)
-
-        if cmd_info is None:
-            if not self.invoke_without_command and not callbacks:
-                parser.print_help()
-            return
-
         # REQ-F-011: resolve effective timeout (env override > per-command > app default)
         effective_timeout = (
             int(os.getenv("TOOL_TIMEOUT_MS", "0"))
             or getattr(ns, "_timeout_ms", 0)
-            or (cmd_info.timeout_ms if cmd_info.timeout_ms is not None else self.default_timeout_ms)
+            or (
+                cmd_info.timeout_ms
+                if cmd_info is not None and cmd_info.timeout_ms is not None
+                else self.default_timeout_ms
+            )
         )
         set_timeout_ms(effective_timeout)
-        _install_timeout(effective_timeout, format_)
+        ctx = _build_context(
+            ns=ns,
+            format_=format_,
+            timeout_ms=effective_timeout,
+            app_name=self.name,
+            command_name=cmd_info.name if cmd_info is not None else getattr(ns, "_command", None),
+        )
 
-        # REQ-C-007: idempotency key deduplication for mutating/destructive commands
-        ikey: str | None = getattr(ns, "idempotency_key", None) if cmd_info.mutating else None
-        if ikey is not None:
-            cache_key = f"{cmd_info.name}:{ikey}"
-            if cache_key in _idempotency_cache:
-                cached = _idempotency_cache[cache_key]
-                noop = {**cached, "effect": "noop"}
-                _cancel_timeout()
-                render_output(noop, format_=format_)
+        with _use_context(ctx):
+            for cb in callbacks:
+                _call_fn(cb, ns, format_, ctx=ctx)
+
+            if cmd_info is None:
+                if not self.invoke_without_command and not callbacks:
+                    parser.print_help()
                 return
 
-        result = _invoke_fn(cmd_info.fn, ns, format_, ctx=ctx)
-        _cancel_timeout()
-        if result is not None:
+            _install_timeout(effective_timeout, format_)
+
+            # REQ-C-007: idempotency key deduplication for mutating/destructive commands
+            ikey: str | None = getattr(ns, "idempotency_key", None) if cmd_info.mutating else None
             if ikey is not None:
-                # Cache the raw dict representation
-                if isinstance(result, dict):
-                    _idempotency_cache[f"{cmd_info.name}:{ikey}"] = result
-                elif hasattr(result, "model_dump"):
-                    _idempotency_cache[f"{cmd_info.name}:{ikey}"] = result.model_dump()
-            render_output(result, format_=format_)
+                cache_key = f"{cmd_info.name}:{ikey}"
+                if cache_key in _idempotency_cache:
+                    cached = _idempotency_cache[cache_key]
+                    noop = {**cached, "effect": "noop"}
+                    _cancel_timeout()
+                    render_output(noop, format_=format_)
+                    return
+
+            result = _invoke_fn(cmd_info.fn, ns, format_, ctx=ctx)
+            _cancel_timeout()
+            if result is not None:
+                if ikey is not None:
+                    # Cache the raw dict representation
+                    if isinstance(result, dict):
+                        _idempotency_cache[f"{cmd_info.name}:{ikey}"] = result
+                    elif hasattr(result, "model_dump"):
+                        _idempotency_cache[f"{cmd_info.name}:{ikey}"] = result.model_dump()
+                render_output(result, format_=format_)
 
 
 # ---------------------------------------------------------------------------
@@ -778,10 +947,19 @@ def run(
     clear_warnings()
     _bootstrap(format_)
 
-    ctx = Context(format_=format_)
-    result = _invoke_fn(fn, ns, format_, ctx=ctx)
-    if result is not None:
-        render_output(result, format_=format_)
+    effective_timeout = int(os.getenv("TOOL_TIMEOUT_MS", "0")) or getattr(ns, "_timeout_ms", 0)
+    set_timeout_ms(effective_timeout)
+    ctx = _build_context(
+        ns=ns,
+        format_=format_,
+        timeout_ms=effective_timeout,
+        app_name=prog or fn.__name__,
+        command_name=prog or fn.__name__,
+    )
+    with _use_context(ctx):
+        result = _invoke_fn(fn, ns, format_, ctx=ctx)
+        if result is not None:
+            render_output(result, format_=format_)
 
 
 # ---------------------------------------------------------------------------
@@ -1076,11 +1254,3 @@ class BadParameter(ValueError):
     def __init__(self, message: str, param_name: str | None = None) -> None:
         super().__init__(message)
         self.param_name = param_name
-
-
-class Context:
-    """Minimal context object for Typer compatibility."""
-
-    def __init__(self, format_: str = "table") -> None:
-        self.format_ = format_
-        self.obj: dict[str, Any] = {}

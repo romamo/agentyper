@@ -329,6 +329,101 @@ class TestAdvancedFeatures:
         assert res.exit_code == 0
         assert contexts == ["callback", "cmd-42"]
 
+    def test_context_exposes_resolved_invocation_state(self) -> None:
+        app = agentyper.Agentyper(name="app", default_timeout_ms=500)
+        captured: dict[str, object] = {}
+
+        @app.command()
+        def cmd(ctx: agentyper.Context) -> None:
+            captured["format"] = ctx.format
+            captured["format_compat"] = ctx.format_
+            captured["verbose"] = ctx.verbose
+            captured["yes"] = ctx.yes
+            captured["no"] = ctx.no
+            captured["answers"] = ctx.answers
+            captured["timeout_ms"] = ctx.timeout_ms
+            captured["runtime_timeout_ms"] = ctx.runtime.timeout_ms
+            captured["runtime_verbosity"] = ctx.runtime.verbosity
+            captured["root_timeout_ms"] = ctx.root.timeout_ms
+            captured["root_verbose"] = ctx.globals.verbose
+
+        answers = json.dumps({"prompts": {"name": "Alice"}})
+        res = runner.invoke(app, ["cmd", "--format", "json", "-vv", "--yes", "--answers", answers])
+        assert res.exit_code == 0
+        assert captured == {
+            "format": "json",
+            "format_compat": "json",
+            "verbose": 2,
+            "yes": True,
+            "no": False,
+            "answers": answers,
+            "timeout_ms": 500,
+            "runtime_timeout_ms": 500,
+            "runtime_verbosity": 2,
+            "root_timeout_ms": 500,
+            "root_verbose": 2,
+        }
+
+    def test_get_current_context_is_available_to_helpers(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        seen: dict[str, object] = {}
+
+        def helper() -> agentyper.Context:
+            return agentyper.get_current_context()
+
+        @app.command()
+        def cmd(ctx: agentyper.Context, name: str) -> None:
+            helper_ctx = helper()
+            seen["same_object"] = helper_ctx is ctx
+            seen["command_name"] = helper_ctx.command_name
+            seen["app_name"] = helper_ctx.app_name
+            seen["param_name"] = helper_ctx.params.name
+
+        res = runner.invoke(app, ["cmd", "Alice"])
+        assert res.exit_code == 0
+        assert seen == {
+            "same_object": True,
+            "command_name": "cmd",
+            "app_name": "app",
+            "param_name": "Alice",
+        }
+
+    def test_get_current_context_resets_after_invocation(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd() -> None:
+            agentyper.get_current_context()
+
+        res = runner.invoke(app, ["cmd"])
+        assert res.exit_code == 0
+
+        try:
+            agentyper.get_current_context()
+        except RuntimeError as exc:
+            assert str(exc) == "No active agentyper invocation context"
+        else:
+            assert False, "expected get_current_context() to fail outside invocation"
+
+    def test_invoke_without_command_runs_callback_context(self) -> None:
+        app = agentyper.Agentyper(name="app", invoke_without_command=True, default_timeout_ms=250)
+        seen: dict[str, object] = {}
+
+        @app.callback()
+        def cb(ctx: agentyper.Context) -> None:
+            current = agentyper.get_current_context()
+            seen["same_object"] = current is ctx
+            seen["command_name"] = current.command_name
+            seen["timeout_ms"] = current.timeout_ms
+
+        res = runner.invoke(app, [])
+        assert res.exit_code == 0
+        assert seen == {
+            "same_object": True,
+            "command_name": None,
+            "timeout_ms": 250,
+        }
+
     def test_subapp_callback(self) -> None:
         app = agentyper.Agentyper(name="root")
         sub = agentyper.Agentyper(name="sub")

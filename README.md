@@ -122,7 +122,7 @@ my-tool wizard --answers '{"confirms":[true],"prompts":["Alice","admin"]}'
 | `Option()`, `Argument()` | ✅ Supported | Core args mapping (`default`, `help`, etc.) |
 | Type Hint Extraction | ✅ Supported | Uses Pydantic for robust validation. |
 | Interactive Prompts (`confirm()`) | ✅ Supported | Enhanced with non-blocking agent overrides. |
-| `typer.Context` (`ctx`) | ⚠️ Mocked | Minimal `Context` mock. `click`-specific methods (`ctx.forward()`, `ctx.meta`) do not exist. |
+| `typer.Context` (`ctx`) | ✅ Supported | Invocation-scoped context exposes `ctx.format`, `ctx.runtime`, `ctx.root`, `ctx.params`, and `ctx.obj`. `click`-specific methods (`ctx.forward()`, `ctx.meta`) still do not exist. |
 | `click` Parameter Types | ❌ Unsupported | Fully replaced by Pydantic. Use `Literal["A"]` instead of `click.Choice`. |
 | `typer.style()`, colors | ❌ Unsupported | Removed. Agents prefer plain text or structured JSON. |
 | Custom `Click` logic | ❌ Unsupported | Executed purely via standard `argparse`. |
@@ -152,6 +152,25 @@ my-tool wizard --answers '{"confirms":[true,false],"prompts":["Alice","admin"]}'
 
 # Agent: pipe answers from stdin
 echo '{"confirms":[true]}' | my-tool delete alice --answers -
+```
+
+## Invocation Context
+
+Commands and callbacks can accept `ctx: agentyper.Context` to inspect the resolved invocation state:
+
+```python
+@app.command()
+def sync(ctx: agentyper.Context, target: str):
+    client = build_client(ctx)
+    agentyper.output({"target": target, "format": ctx.format})
+```
+
+Helper code can also read the active invocation context without manually threading it through every call:
+
+```python
+def build_client(ctx: agentyper.Context | None = None) -> Client:
+    ctx = ctx or agentyper.get_current_context()
+    return Client(timeout_ms=ctx.runtime.timeout_ms, verbose=ctx.runtime.verbosity > 0)
 ```
 
 ## License
