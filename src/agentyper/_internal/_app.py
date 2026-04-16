@@ -32,8 +32,8 @@ import signal
 import sys
 import typing
 from collections.abc import Callable
-from types import MappingProxyType
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, get_type_hints
 
 from pydantic import ValidationError as _PydanticValidationError

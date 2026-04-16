@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.9] - 2026-04-16
+
+### Added
+- **Invocation context API**: commands and callbacks now share a richer `agentyper.Context`, and helper code can access the active invocation via `agentyper.get_current_context()`.
+
+### Fixed
+- **Root invocation safety**: callback-only invocations no longer risk dereferencing command timeout metadata when no subcommand is selected.
+- **Test/lint cleanup**: replaced a bare `assert False` path in the test suite and normalized import ordering to keep Ruff clean.
+
 ## [0.1.8] - 2026-04-07
 
 ### Added

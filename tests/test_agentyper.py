@@ -403,7 +403,7 @@ class TestAdvancedFeatures:
         except RuntimeError as exc:
             assert str(exc) == "No active agentyper invocation context"
         else:
-            assert False, "expected get_current_context() to fail outside invocation"
+            raise AssertionError("expected get_current_context() to fail outside invocation")
 
     def test_invoke_without_command_runs_callback_context(self) -> None:
         app = agentyper.Agentyper(name="app", invoke_without_command=True, default_timeout_ms=250)
