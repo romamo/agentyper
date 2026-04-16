@@ -158,6 +158,7 @@ def build_app_schema(
             "description": inspect.cleandoc(cmd_info.fn.__doc__ or ""),
             "input_schema": input_schema,
             "danger_level": cmd_info.danger_level,
+            "option_placement": cmd_info.option_placement,
             "exit_codes": {
                 str(int(code)): {
                     "name": e.name,

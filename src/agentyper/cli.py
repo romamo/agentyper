@@ -83,7 +83,7 @@ def callback(
     pass
 
 
-@app.command()
+@app.command(option_placement="strict")
 def run() -> None:
     """Run the provided Agentyper app."""
     # This command handles parsing `run` in help, but execution is intercepted below.

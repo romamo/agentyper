@@ -66,6 +66,7 @@ from agentyper._internal._session import InteractiveSession, set_session
 
 
 _DangerLevel = str  # "safe" | "mutating" | "destructive"
+_OptionPlacement = str  # "any" | "strict"
 
 # Session-scoped idempotency cache: "{cmd_name}:{key}" → raw result dict (REQ-C-007)
 _idempotency_cache: dict[str, dict[str, Any]] = {}
@@ -93,6 +94,7 @@ class CommandInfo:
     help: str
     mutating: bool
     danger_level: _DangerLevel = "safe"
+    option_placement: _OptionPlacement = "any"
     exit_codes: dict[int, ExitCodeEntry] = dataclasses.field(default_factory=dict)
     requires_editor: bool = False
     non_interactive_alternatives: list[str] = dataclasses.field(default_factory=list)
@@ -105,6 +107,150 @@ class CommandInfo:
 
 def _is_ci() -> bool:
     return bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
+
+
+def _global_option_specs(*, has_version: bool) -> dict[str, bool]:
+    """Return framework option strings mapped to whether they consume a value."""
+    specs = {
+        "-h": False,
+        "--help": False,
+        "--schema": False,
+        "--format": True,
+        "--yes": False,
+        "-y": False,
+        "--no": False,
+        "--answers": True,
+        "-a": True,
+        "--timeout": True,
+        "-v": False,
+    }
+    if has_version:
+        specs["--version"] = False
+    return specs
+
+
+def _command_option_specs(cmd_info: CommandInfo) -> dict[str, bool]:
+    """Return known option strings for a command, including framework-injected flags."""
+    specs = _global_option_specs(has_version=False)
+
+    hints = get_type_hints(cmd_info.fn)
+    sig = inspect.signature(cmd_info.fn)
+    for param_name, param in sig.parameters.items():
+        if param_name in _GLOBAL_PARAMS or param_name in {
+            "dry_run",
+            "ctx",
+            "_ctx",
+            "context",
+            "idempotency_key",
+            "_timeout_ms",
+        }:
+            continue
+
+        annotation = hints.get(param_name, str)
+        default = param.default
+        if isinstance(default, OptionInfo):
+            decls = default.param_decls or (f"--{param_name.replace('_', '-')}",)
+            consumes_value = not (annotation is bool or default.is_flag)
+            for decl in decls:
+                specs[decl] = consumes_value
+            continue
+
+        if isinstance(default, ArgumentInfo) or default in (inspect.Parameter.empty, ...):
+            continue
+
+        flag_name = f"--{param_name.replace('_', '-')}"
+        specs[flag_name] = annotation is not bool
+
+    if cmd_info.mutating:
+        specs["--dry-run"] = False
+        specs["--idempotency-key"] = True
+
+    return specs
+
+
+def _matches_option_token(token: str, option_specs: dict[str, bool]) -> bool:
+    """Return True if token matches a known option string."""
+    if token in option_specs:
+        return True
+    if token.startswith("--") and "=" in token:
+        return token.split("=", 1)[0] in option_specs
+    if "-v" in option_specs and token.startswith("-v") and set(token[1:]) == {"v"}:
+        return True
+    return False
+
+
+def _option_consumes_value(token: str, option_specs: dict[str, bool]) -> bool:
+    """Return whether a token's option form consumes the following argv token."""
+    if token in option_specs:
+        return option_specs[token]
+    if token.startswith("--") and "=" in token:
+        return False
+    if "-v" in option_specs and token.startswith("-v") and set(token[1:]) == {"v"}:
+        return False
+    return False
+
+
+def _find_command_token_index(
+    raw_args: list[str],
+    command_path: list[str],
+    *,
+    has_version: bool,
+) -> int | None:
+    """Locate the final command token in argv while skipping global flag values."""
+    option_specs = _global_option_specs(has_version=has_version)
+    path_index = 0
+    last_match: int | None = None
+    i = 0
+    while i < len(raw_args) and path_index < len(command_path):
+        token = raw_args[i]
+        if token == command_path[path_index]:
+            last_match = i
+            path_index += 1
+            i += 1
+            continue
+        if _matches_option_token(token, option_specs):
+            i += 1
+            if _option_consumes_value(token, option_specs):
+                i += 1
+            continue
+        i += 1
+    return last_match if path_index == len(command_path) else None
+
+
+def _validate_strict_option_placement(
+    raw_args: list[str],
+    *,
+    cmd_info: CommandInfo,
+    command_path: list[str] | None,
+    has_version: bool,
+    parser: _Parser,
+) -> None:
+    """Reject known options after positional args for strict-placement commands."""
+    if cmd_info.option_placement != "strict" or not command_path:
+        return
+
+    command_index = _find_command_token_index(raw_args, command_path, has_version=has_version)
+    if command_index is None:
+        return
+
+    option_specs = _command_option_specs(cmd_info)
+    seen_positional = False
+    i = command_index + 1
+    while i < len(raw_args):
+        token = raw_args[i]
+        if token == "--":
+            return
+        if _matches_option_token(token, option_specs):
+            if seen_positional:
+                parser.error(
+                    "strict-placement commands require options before positional arguments"
+                )
+            i += 1
+            if _option_consumes_value(token, option_specs):
+                i += 1
+            continue
+        seen_positional = True
+        i += 1
 
 
 # ---------------------------------------------------------------------------
@@ -253,6 +399,7 @@ class Agentyper:
         help: str | None = None,
         mutating: bool = False,
         danger_level: _DangerLevel | None = None,
+        option_placement: _OptionPlacement = "any",
         exit_codes: dict[int, ExitCodeEntry] | None = None,
         requires_editor: bool = False,
         non_interactive_alternatives: list[str] | None = None,
@@ -285,6 +432,7 @@ class Agentyper:
                 help=cmd_help,
                 mutating=mutating,
                 danger_level=_dl,
+                option_placement=option_placement,
                 exit_codes=exit_codes or {},
                 requires_editor=requires_editor,
                 non_interactive_alternatives=non_interactive_alternatives or [],
@@ -357,7 +505,9 @@ class Agentyper:
             for cmd_name, cmd_info in self._commands.items():
 
                 def _cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
-                    return fn_to_input_schema(ci.fn)
+                    schema = fn_to_input_schema(ci.fn)
+                    schema["option_placement"] = ci.option_placement
+                    return schema
 
                 sub = subparsers.add_parser(
                     cmd_name,
@@ -388,7 +538,11 @@ class Agentyper:
                             " return the original result (REQ-C-007)"
                         ),
                     )
-                sub.set_defaults(_cmd_info=cmd_info, _callbacks=my_callbacks)
+                sub.set_defaults(
+                    _cmd_info=cmd_info,
+                    _callbacks=my_callbacks,
+                    _command_path=[cmd_name],
+                )
 
             for sub_name, sub_app in self._sub_apps.items():
                 sub = subparsers.add_parser(
@@ -396,11 +550,16 @@ class Agentyper:
                     help=sub_app.help or "",
                     add_help=False,
                 )
-                sub_app._mount_into(sub, callbacks=my_callbacks)
+                sub_app._mount_into(sub, callbacks=my_callbacks, path_prefix=[sub_name])
 
         return parser
 
-    def _mount_into(self, parent: argparse.ArgumentParser, callbacks: list[Callable]) -> None:
+    def _mount_into(
+        self,
+        parent: argparse.ArgumentParser,
+        callbacks: list[Callable],
+        path_prefix: list[str],
+    ) -> None:
         """Mount this app's commands into an existing subparser slot."""
         self._inject_global_flags(parent, schema_fn=self.get_schema)
         my_callbacks = callbacks.copy()
@@ -413,7 +572,9 @@ class Agentyper:
             for cmd_name, cmd_info in self._commands.items():
 
                 def _sub_cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
-                    return fn_to_input_schema(ci.fn)
+                    schema = fn_to_input_schema(ci.fn)
+                    schema["option_placement"] = ci.option_placement
+                    return schema
 
                 sub = subparsers.add_parser(cmd_name, help=cmd_info.help, add_help=False)
                 self._inject_global_flags(
@@ -438,7 +599,11 @@ class Agentyper:
                             " return the original result (REQ-C-007)"
                         ),
                     )
-                sub.set_defaults(_cmd_info=cmd_info, _callbacks=my_callbacks)
+                sub.set_defaults(
+                    _cmd_info=cmd_info,
+                    _callbacks=my_callbacks,
+                    _command_path=[*path_prefix, cmd_name],
+                )
 
             for sub_name, sub_app in self._sub_apps.items():
                 sub = subparsers.add_parser(
@@ -446,7 +611,7 @@ class Agentyper:
                     help=sub_app.help or "",
                     add_help=False,
                 )
-                sub_app._mount_into(sub, callbacks=my_callbacks)
+                sub_app._mount_into(sub, callbacks=my_callbacks, path_prefix=[*path_prefix, sub_name])
 
     def _inject_global_flags(
         self,
@@ -649,8 +814,9 @@ class Agentyper:
 
     def __call__(self, args: list[str] | None = None) -> None:
         """Parse arguments and dispatch to the appropriate command."""
+        raw_args = list(args) if args is not None else sys.argv[1:]
         parser = self._build_parser()
-        ns = parser.parse_args(args)
+        ns = parser.parse_args(raw_args)
 
         configure_logging(getattr(ns, "verbose", 0))
 
@@ -670,6 +836,7 @@ class Agentyper:
         _bootstrap(format_)
 
         cmd_info: CommandInfo | None = getattr(ns, "_cmd_info", None)
+        command_path: list[str] | None = getattr(ns, "_command_path", None)
         callbacks: list[Callable] = getattr(ns, "_callbacks", [])
 
         if not cmd_info and not callbacks and self._callback_fn:
@@ -684,6 +851,14 @@ class Agentyper:
             if not self.invoke_without_command and not callbacks:
                 parser.print_help()
             return
+
+        _validate_strict_option_placement(
+            raw_args,
+            cmd_info=cmd_info,
+            command_path=command_path,
+            has_version=self.version is not None,
+            parser=parser,
+        )
 
         # REQ-F-011: resolve effective timeout (env override > per-command > app default)
         effective_timeout = (

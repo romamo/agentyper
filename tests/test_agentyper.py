@@ -71,6 +71,24 @@ class TestSchema:
         data = json.loads(result.stdout)
         assert data["type"] == "object"
         assert "ticker" in data["properties"]
+        assert data["option_placement"] == "any"
+
+    def test_app_schema_includes_option_placement(self) -> None:
+        app = make_search_app()
+        schema = app.get_schema()
+        assert schema["commands"]["search"]["option_placement"] == "any"
+
+    def test_strict_command_schema_flag_includes_option_placement(self) -> None:
+        app = agentyper.Agentyper(name="strict-tool")
+
+        @app.command(option_placement="strict")
+        def forward(target: str) -> None:
+            agentyper.output({"target": target})
+
+        result = runner.invoke(app, ["forward", "--schema"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["option_placement"] == "strict"
 
     def test_fn_schema_via_run(self) -> None:
         def greet(name: str, count: int = 1):
@@ -116,6 +134,75 @@ class TestOutputFormat:
         result = runner.invoke(app, ["search", "AAPL", "--format", "table"])
         assert result.exit_code == 0
         assert "AAPL" in result.stdout
+
+    def test_interspersed_global_flags_before_subcommand_match_after(self) -> None:
+        app = make_search_app()
+        before = runner.invoke(app, ["--format", "json", "search", "AAPL", "--limit", "2"])
+        after = runner.invoke(app, ["search", "AAPL", "--limit", "2", "--format", "json"])
+
+        assert before.exit_code == after.exit_code == 0
+        assert json.loads(before.stdout)["data"] == json.loads(after.stdout)["data"]
+
+    def test_interspersed_command_flag_between_positionals(self) -> None:
+        app = agentyper.Agentyper(name="pairs")
+
+        @app.command()
+        def pair(
+            left: str,
+            right: str,
+            mode: str = agentyper.Option("joined", "--mode", help="Pairing mode"),
+        ) -> None:
+            agentyper.output({"left": left, "right": right, "mode": mode})
+
+        result = runner.invoke(app, ["pair", "L", "--mode", "split", "R", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["data"] == {"left": "L", "right": "R", "mode": "split"}
+
+    def test_interspersed_command_flag_with_variadic_positionals(self) -> None:
+        app = agentyper.Agentyper(name="collector")
+
+        @app.command()
+        def collect(
+            first: str,
+            rest: list[str] = agentyper.Argument(..., help="Remaining values"),
+            limit: int = agentyper.Option(10, "--limit", help="Max values"),
+        ) -> None:
+            agentyper.output({"first": first, "rest": rest, "limit": limit})
+
+        result = runner.invoke(
+            app,
+            ["collect", "a", "--limit", "2", "b", "c", "--format", "json"],
+        )
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)
+        assert data["data"] == {"first": "a", "rest": ["b", "c"], "limit": 2}
+
+    def test_strict_command_rejects_global_option_after_positional(self) -> None:
+        app = agentyper.Agentyper(name="strict-tool")
+
+        @app.command(option_placement="strict")
+        def forward(target: str) -> None:
+            agentyper.output({"target": target})
+
+        result = runner.invoke(app, ["forward", "script.py", "--format", "json"])
+        assert result.exit_code == agentyper.ExitCode.ARG_ERROR
+        assert "strict-placement commands require options" in result.stderr
+
+    def test_strict_command_rejects_command_option_after_positional(self) -> None:
+        app = agentyper.Agentyper(name="strict-tool")
+
+        @app.command(option_placement="strict")
+        def pair(
+            left: str,
+            right: str,
+            mode: str = agentyper.Option("joined", "--mode", help="Pairing mode"),
+        ) -> None:
+            agentyper.output({"left": left, "right": right, "mode": mode})
+
+        result = runner.invoke(app, ["pair", "L", "--mode", "split", "R", "--format", "json"])
+        assert result.exit_code == agentyper.ExitCode.ARG_ERROR
+        assert "strict-placement commands require options" in result.stderr
 
 
 # ---------------------------------------------------------------------------
