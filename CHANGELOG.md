@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.12] - 2026-04-17
+
+### Changed
+- **Capability-aware help output**: `--yes`, `--no`, `--answers`, and `--timeout` are now shown in `--help` only for apps and commands that declare or auto-detect those capabilities.
+- **Explicit opt-ins**: `Agentyper(...)`, `@app.command(...)`, and `agentyper.run(...)` now accept `interactive=` and `enable_timeout=` controls so CLI authors can expose flags intentionally when static detection is not enough.
+- **Docs and examples**: README plus agent/developer guides now explain the new visibility rules and when to expose interactive or timeout support explicitly.
+
+### Fixed
+- **Defensive caller compatibility**: hidden interaction flags remain accepted by the parser and continue to populate invocation context correctly even when omitted from help text.
+- **Coverage for flag visibility**: added tests for auto-detection, explicit opt-ins, hidden-but-accepted interaction flags, and timeout flag visibility defaults.
+
 ## [0.1.11] - 2026-04-16
 
 ### Fixed

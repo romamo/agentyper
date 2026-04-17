@@ -131,7 +131,20 @@ Agents read `required` from the schema before calling. Missing required fields i
 
 ## 6. Make interactive features agent-safe
 
-All of `confirm()`, `prompt()`, and `edit()` are safe in non-TTY context when called with `--yes`, `--no`, or `--answers`. Write them naturally:
+All of `confirm()`, `prompt()`, and `edit()` are safe in non-TTY context when called with `--yes`, `--no`, or `--answers`.
+
+Those flags are always accepted by the parser, but they are shown in `--help` only when the app/command is interactive. agentyper will surface them automatically when it can detect interactive routines, and you can declare them explicitly when needed:
+
+```python
+app = agentyper.Agentyper(name="my-tool", interactive=True)
+
+
+@app.command(interactive=True)
+def setup() -> None:
+    ...
+```
+
+Write interactive commands naturally:
 
 ```python
 @app.command()
@@ -164,6 +177,25 @@ def setup() -> None:
     if agentyper.confirm("Save?"):
         service.save(name, role)
 ```
+
+If your command reaches interactive behavior indirectly through helper functions, mark that command with `interactive=True` so the flags are visible in `--help` instead of just being silently accepted.
+
+---
+
+## 6.1 Declare timeout support only where it matters
+
+`--timeout MS` is also capability-based. It appears only when timeout handling is enabled for the app or command.
+
+```python
+app = agentyper.Agentyper(name="my-tool", default_timeout_ms=30_000)
+
+
+@app.command(timeout_ms=5_000)
+def sync() -> None:
+    ...
+```
+
+Use `enable_timeout=True` when you want the flag exposed even if the actual timeout value is resolved elsewhere. Leave timeout disabled for commands that do not need it so their help stays smaller and clearer.
 
 ---
 
@@ -284,6 +316,7 @@ def test_dry_run():
 ```
 
 Test every `--yes`, `--answers`, and `--dry-run` path explicitly. These are the paths agents exercise most.
+Also test that interactive and timeout flags appear only on the commands that are meant to expose them.
 
 ---
 

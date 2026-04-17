@@ -257,6 +257,15 @@ class Testrun:
         data = json.loads(result.stdout)
         assert "name" in data["properties"]
 
+    def test_run_help_keeps_timeout_flag_by_default(self) -> None:
+        def greet(name: str) -> None:
+            """Greet."""
+
+        result = runner.invoke(greet, ["--help"])
+        help_text = result.stdout + result.stderr
+        assert result.exit_code == 0
+        assert "--timeout" in help_text
+
 
 # ---------------------------------------------------------------------------
 # Sub-app tests
@@ -330,7 +339,7 @@ class TestAdvancedFeatures:
         assert contexts == ["callback", "cmd-42"]
 
     def test_context_exposes_resolved_invocation_state(self) -> None:
-        app = agentyper.Agentyper(name="app", default_timeout_ms=500)
+        app = agentyper.Agentyper(name="app", interactive=True, default_timeout_ms=500)
         captured: dict[str, object] = {}
 
         @app.command()
@@ -363,6 +372,94 @@ class TestAdvancedFeatures:
             "root_timeout_ms": 500,
             "root_verbose": 2,
         }
+
+    def test_help_hides_interaction_and_timeout_flags_when_unused(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd(name: str) -> None:
+            """Simple command."""
+
+        res = runner.invoke(app, ["cmd", "--help"])
+        help_text = res.stdout + res.stderr
+        assert res.exit_code == 0
+        assert "--yes" not in help_text
+        assert "--no" not in help_text
+        assert "--answers" not in help_text
+        assert "--timeout" not in help_text
+
+    def test_hidden_interaction_flags_are_still_accepted_and_reach_context(self) -> None:
+        app = agentyper.Agentyper(name="app")
+        captured: dict[str, object] = {}
+
+        @app.command()
+        def cmd(ctx: agentyper.Context) -> None:
+            captured["yes"] = ctx.yes
+            captured["no"] = ctx.no
+            captured["answers"] = ctx.answers
+
+        answers = json.dumps({"confirms": [True]})
+        res = runner.invoke(app, ["cmd", "--yes", "--answers", answers])
+        assert res.exit_code == 0
+        assert captured == {
+            "yes": True,
+            "no": False,
+            "answers": answers,
+        }
+
+    def test_interaction_flags_are_auto_added_when_command_uses_prompt_routines(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd() -> None:
+            """Interactive command."""
+            agentyper.confirm("Continue?")
+
+        help_res = runner.invoke(app, ["cmd", "--help"])
+        help_text = help_res.stdout + help_res.stderr
+        assert help_res.exit_code == 0
+        assert "--yes" in help_text
+        assert "--answers" in help_text
+
+        res = runner.invoke(app, ["cmd", "--yes"])
+        assert res.exit_code == 0
+
+    def test_interaction_flags_can_be_explicitly_enabled(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command(interactive=True)
+        def cmd() -> None:
+            """Declared interactive."""
+
+        help_res = runner.invoke(app, ["cmd", "--help"])
+        help_text = help_res.stdout + help_res.stderr
+        assert help_res.exit_code == 0
+        assert "--yes" in help_text
+        assert "--answers" in help_text
+
+    def test_timeout_flag_is_hidden_until_enabled(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command()
+        def cmd() -> None:
+            """No timeout."""
+
+        res = runner.invoke(app, ["cmd", "--help"])
+        help_text = res.stdout + res.stderr
+        assert res.exit_code == 0
+        assert "--timeout" not in help_text
+
+    def test_timeout_flag_is_added_when_command_declares_timeout(self) -> None:
+        app = agentyper.Agentyper(name="app")
+
+        @app.command(timeout_ms=250)
+        def cmd() -> None:
+            """Timed command."""
+
+        res = runner.invoke(app, ["cmd", "--help"])
+        help_text = res.stdout + res.stderr
+        assert res.exit_code == 0
+        assert "--timeout" in help_text
 
     def test_callback_option_before_subcommand_is_parsed(self) -> None:
         app = agentyper.Agentyper(name="app")

@@ -86,16 +86,24 @@ import agentyper as typer  # ← after; everything else stays identical
 
 ## What Agents Get for Free
 
-Every command automatically gains:
+Every parser gets the core machine-facing flags:
 
 ```bash
 my-tool --schema                  # full JSON Schema of the entire app
 my-tool search --schema           # JSON Schema for this command's params
 my-tool search AAPL --format csv  # 4× cheaper output than table
 my-tool search AAPL --format json # structured JSON output
+```
+
+Interaction flags are always accepted, but they are shown in `--help` only when the app or command declares them explicitly or when agentyper can tell they are relevant. Timeout remains capability-based:
+
+```bash
 my-tool delete alice --yes        # skip confirm() in agent mode
 my-tool wizard --answers '{"confirms":[true],"prompts":["Alice","admin"]}'
+my-tool sync --timeout 5000       # available when timeout support is enabled
 ```
+
+This keeps `--help` output compact for simple non-interactive CLIs while still letting callers pass prompt-bypass flags defensively.
 
 **If you are an agent consuming an agentyper CLI, read [docs/for-agents.md](docs/for-agents.md)** for schema discovery, error handling, and the full flag reference.  
 **If you are building a CLI with agentyper, read [docs/for-developers.md](docs/for-developers.md)** for patterns, best practices, and a pre-ship checklist.
@@ -108,7 +116,7 @@ my-tool wizard --answers '{"confirms":[true],"prompts":["Alice","admin"]}'
 | `--format json/csv/table` | ✅ automatic | ❌ manual |
 | Structured JSON errors | ✅ automatic | ❌ free text |
 | Exit code taxonomy (0/1/2) | ✅ | ❌ 0 or 1 |
-| Interactive features in agent mode | ✅ `--yes/--answers` bypass | ❌ blocks |
+| Interactive features in agent mode | ✅ bypass flags when interactive | ❌ blocks |
 | `isatty()` auto-format detection | ✅ | ❌ |
 | Dependencies | argparse + pydantic | Click + Typer |
 
@@ -138,7 +146,7 @@ agentyper.EXIT_SYSTEM     = 2  # system error — agent should abort
 ## Interactive Features
 
 All interactive features from Typer work identically in a terminal.
-In agent/non-TTY mode, they resolve without blocking:
+In agent/non-TTY mode, they resolve without blocking. The interaction flags may be hidden from `--help` on non-interactive commands, but they are still accepted by the parser:
 
 ```bash
 # Human terminal: asks interactively
@@ -153,6 +161,32 @@ my-tool wizard --answers '{"confirms":[true,false],"prompts":["Alice","admin"]}'
 # Agent: pipe answers from stdin
 echo '{"confirms":[true]}' | my-tool delete alice --answers -
 ```
+
+If static detection is not enough for your app shape, expose the flags explicitly:
+
+```python
+app = agentyper.Agentyper(name="my-tool", interactive=True)
+
+
+@app.command(interactive=True)
+def wizard() -> None:
+    ...
+```
+
+## Timeout Support
+
+`--timeout MS` is also opt-in. It appears when timeout support is declared at the app or command level.
+
+```python
+app = agentyper.Agentyper(name="my-tool", default_timeout_ms=30_000)
+
+
+@app.command(timeout_ms=5_000)
+def sync() -> None:
+    ...
+```
+
+Use `enable_timeout=True` if you want the flag available even when the timeout value is supplied elsewhere.
 
 ## Invocation Context
 

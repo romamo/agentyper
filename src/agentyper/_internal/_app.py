@@ -7,7 +7,7 @@ Provides:
 - app.add_agentyper() — nest a sub-app as a command group
 - app()            — parse sys.argv and dispatch
 
-Auto-injects on every command:
+Auto-injects on eligible commands/parsers:
   --format {table,json,csv}   output format (default: table; auto: isatty)
   --schema                    print command JSON Schema and exit
   --yes / -y                  auto-confirm all confirm() calls
@@ -21,6 +21,7 @@ Auto-injects on every command:
 from __future__ import annotations
 
 import argparse
+import ast
 import collections.abc
 import contextlib
 import contextvars
@@ -119,6 +120,7 @@ class CommandInfo:
     exit_codes: dict[int, ExitCodeEntry] = dataclasses.field(default_factory=dict)
     requires_editor: bool = False
     non_interactive_alternatives: list[str] = dataclasses.field(default_factory=list)
+    interactive: bool | None = None  # None = auto-detect from handler body
     timeout_ms: int | None = None  # None = inherit from app default
 
     def __post_init__(self) -> None:
@@ -366,8 +368,12 @@ class Agentyper:
     """
     Agent-first multi-command CLI application.
 
-    Drop-in Typer replacement with built-in agent ergonomics:
-    ``--schema``, ``--format``, ``--yes``, ``--no``, ``--answers``.
+    Drop-in Typer replacement with built-in agent ergonomics.
+
+    Core flags such as ``--schema`` and ``--format`` are always available.
+    Interaction flags (``--yes``, ``--no``, ``--answers``) and ``--timeout``
+    are exposed only when explicitly enabled or when the command/app metadata
+    indicates they are relevant.
 
     Example::
 
@@ -389,12 +395,16 @@ class Agentyper:
         version: str | None = None,
         help: str | None = None,
         invoke_without_command: bool = False,
+        interactive: bool | None = None,
+        enable_timeout: bool | None = None,
         default_timeout_ms: int = 0,
     ) -> None:
         self.name = name
         self.version = version
         self.help = help
         self.invoke_without_command = invoke_without_command
+        self.interactive = interactive
+        self.enable_timeout = enable_timeout
         self.default_timeout_ms = default_timeout_ms
         self._commands: dict[str, CommandInfo] = {}
         self._sub_apps: dict[str, Agentyper] = {}
@@ -414,6 +424,7 @@ class Agentyper:
         exit_codes: dict[int, ExitCodeEntry] | None = None,
         requires_editor: bool = False,
         non_interactive_alternatives: list[str] | None = None,
+        interactive: bool | None = None,
         timeout_ms: int | None = None,
     ) -> Callable:
         """
@@ -446,6 +457,7 @@ class Agentyper:
                 exit_codes=exit_codes or {},
                 requires_editor=requires_editor,
                 non_interactive_alternatives=non_interactive_alternatives or [],
+                interactive=interactive,
                 timeout_ms=timeout_ms,
             )
             return fn
@@ -500,7 +512,12 @@ class Agentyper:
             formatter_class=argparse.RawDescriptionHelpFormatter,
             add_help=False,
         )
-        self._inject_global_flags(parser, schema_fn=self.get_schema)
+        self._inject_global_flags(
+            parser,
+            schema_fn=self.get_schema,
+            include_interaction=self._parser_supports_interaction(callbacks=callbacks),
+            include_timeout=self._parser_supports_timeout(),
+        )
 
         my_callbacks = callbacks.copy()
         if self._callback_fn:
@@ -528,6 +545,10 @@ class Agentyper:
                 self._inject_global_flags(
                     sub,
                     schema_fn=_cmd_schema_fn,
+                    include_interaction=self._command_supports_interaction(
+                        cmd_info, callbacks=my_callbacks
+                    ),
+                    include_timeout=self._command_supports_timeout(cmd_info),
                     suppress_defaults=True,
                 )
                 self._add_callback_params(sub, my_callbacks, suppress_defaults=True)
@@ -563,7 +584,13 @@ class Agentyper:
 
     def _mount_into(self, parent: argparse.ArgumentParser, callbacks: list[Callable]) -> None:
         """Mount this app's commands into an existing subparser slot."""
-        self._inject_global_flags(parent, schema_fn=self.get_schema, suppress_defaults=True)
+        self._inject_global_flags(
+            parent,
+            schema_fn=self.get_schema,
+            include_interaction=self._parser_supports_interaction(callbacks=callbacks),
+            include_timeout=self._parser_supports_timeout(),
+            suppress_defaults=True,
+        )
         my_callbacks = callbacks.copy()
         if self._callback_fn:
             my_callbacks.append(self._callback_fn)
@@ -581,6 +608,10 @@ class Agentyper:
                 self._inject_global_flags(
                     sub,
                     schema_fn=_sub_cmd_schema_fn,
+                    include_interaction=self._command_supports_interaction(
+                        cmd_info, callbacks=my_callbacks
+                    ),
+                    include_timeout=self._command_supports_timeout(cmd_info),
                     suppress_defaults=True,
                 )
                 self._add_callback_params(sub, my_callbacks, suppress_defaults=True)
@@ -617,6 +648,8 @@ class Agentyper:
         parser: argparse.ArgumentParser,
         schema_fn: Callable[[], dict[str, Any]],
         *,
+        include_interaction: bool = True,
+        include_timeout: bool = True,
         suppress_defaults: bool = False,
     ) -> None:
         """Add the standard agentyper global flags to a parser."""
@@ -647,39 +680,42 @@ class Agentyper:
             help="Output format: table (default in TTY), json, csv",
         )
 
-        # --yes / --no
+        interaction_help = "Auto-confirm all prompts" if include_interaction else argparse.SUPPRESS
         parser.add_argument(
             "--yes",
             "-y",
             action="store_true",
             default=argparse.SUPPRESS if suppress_defaults else False,
-            help="Auto-confirm all prompts",
+            help=interaction_help,
         )
         parser.add_argument(
             "--no",
             action="store_true",
             default=argparse.SUPPRESS if suppress_defaults else False,
-            help="Auto-deny all confirm() calls",
+            help="Auto-deny all confirm() calls" if include_interaction else argparse.SUPPRESS,
         )
-
-        # --answers
         parser.add_argument(
             "--answers",
             "-a",
             default=argparse.SUPPRESS if suppress_defaults else None,
             metavar="JSON",
-            help="JSON string, file path, or '-' for STDIN with interactive answers",
+            help=(
+                "JSON string, file path, or '-' for STDIN with interactive answers"
+                if include_interaction
+                else argparse.SUPPRESS
+            ),
         )
 
-        # --timeout (REQ-F-011: per-invocation override)
-        parser.add_argument(
-            "--timeout",
-            type=int,
-            default=argparse.SUPPRESS if suppress_defaults else 0,
-            dest="_timeout_ms",
-            metavar="MS",
-            help="Wall-clock timeout in milliseconds (0 = use framework default)",
-        )
+        if include_timeout:
+            # --timeout (REQ-F-011: per-invocation override)
+            parser.add_argument(
+                "--timeout",
+                type=int,
+                default=argparse.SUPPRESS if suppress_defaults else 0,
+                dest="_timeout_ms",
+                metavar="MS",
+                help="Wall-clock timeout in milliseconds (0 = use framework default)",
+            )
 
         # -v / -vv verbosity
         parser.add_argument(
@@ -697,6 +733,48 @@ class Agentyper:
                 action="version",
                 version=f"{self.name or 'agentyper'} {self.version}",
             )
+
+    def _parser_supports_interaction(self, callbacks: list[Callable]) -> bool:
+        if self.interactive is not None:
+            return self.interactive
+        if any(_fn_uses_interaction(cb) for cb in callbacks):
+            return True
+        if self._callback_fn and _fn_uses_interaction(self._callback_fn):
+            return True
+        if any(
+            self._command_supports_interaction(cmd_info, callbacks=[])
+            for cmd_info in self._commands.values()
+        ):
+            return True
+        return any(
+            sub_app._parser_supports_interaction(callbacks=[])
+            for sub_app in self._sub_apps.values()
+        )
+
+    def _command_supports_interaction(
+        self, cmd_info: CommandInfo, callbacks: list[Callable]
+    ) -> bool:
+        if cmd_info.interactive is not None:
+            return cmd_info.interactive
+        if self.interactive is not None:
+            return self.interactive
+        if any(_fn_uses_interaction(cb) for cb in callbacks):
+            return True
+        return _fn_uses_interaction(cmd_info.fn)
+
+    def _parser_supports_timeout(self) -> bool:
+        if self.enable_timeout is not None:
+            return self.enable_timeout
+        if self.default_timeout_ms > 0:
+            return True
+        if any(self._command_supports_timeout(cmd_info) for cmd_info in self._commands.values()):
+            return True
+        return any(sub_app._parser_supports_timeout() for sub_app in self._sub_apps.values())
+
+    def _command_supports_timeout(self, cmd_info: CommandInfo) -> bool:
+        if self.enable_timeout is not None:
+            return self.enable_timeout
+        return cmd_info.timeout_ms is not None or self.default_timeout_ms > 0
 
     def _add_callback_params(
         self,
@@ -947,6 +1025,8 @@ def run(
     *,
     prog: str | None = None,
     version: str | None = None,
+    interactive: bool | None = None,
+    enable_timeout: bool | None = None,
 ) -> None:
     """
     Run a single function as a complete CLI application.
@@ -969,7 +1049,12 @@ def run(
         prog:    Override the program name (defaults to ``fn.__name__``).
         version: Version string for ``--version`` flag.
     """
-    app = Agentyper(name=prog or fn.__name__, version=version)
+    app = Agentyper(
+        name=prog or fn.__name__,
+        version=version,
+        interactive=interactive,
+        enable_timeout=enable_timeout,
+    )
 
     # Build a flat parser (no subcommands)
     parser = _Parser(
@@ -978,7 +1063,12 @@ def run(
         formatter_class=argparse.RawDescriptionHelpFormatter,
         add_help=False,
     )
-    app._inject_global_flags(parser, schema_fn=lambda: fn_to_input_schema(fn))
+    app._inject_global_flags(
+        parser,
+        schema_fn=lambda: fn_to_input_schema(fn),
+        include_interaction=interactive if interactive is not None else _fn_uses_interaction(fn),
+        include_timeout=True if enable_timeout is None else enable_timeout,
+    )
     app._add_fn_params(parser, fn)
 
     ns = parser.parse_args(args)
@@ -1015,6 +1105,74 @@ def run(
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
+
+
+def _fn_uses_interaction(fn: Callable) -> bool:
+    """Best-effort static detection for confirm()/prompt()/edit() usage."""
+    code = getattr(fn, "__code__", None)
+    co_names = set(code.co_names) if code is not None else set()
+    if {"confirm", "prompt", "edit"} & co_names:
+        return True
+
+    try:
+        source = inspect.getsource(fn)
+    except (OSError, TypeError):
+        return False
+
+    try:
+        tree = ast.parse(inspect.cleandoc(source))
+    except SyntaxError:
+        return False
+
+    interactive_names = {"confirm", "prompt", "edit"}
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        target = _resolve_call_target(fn, node.func)
+        if target in interactive_names:
+            return True
+
+    return False
+
+
+def _resolve_call_target(fn: Callable, node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name in {"confirm", "prompt", "edit"}:
+            return name
+        global_value = fn.__globals__.get(name)
+        return _resolve_runtime_interactive_name(global_value)
+
+    if isinstance(node, ast.Attribute):
+        if node.attr not in {"confirm", "prompt", "edit"}:
+            return None
+        root_value = _resolve_attribute_root(fn, node.value)
+        if root_value is not None and hasattr(root_value, node.attr):
+            return _resolve_runtime_interactive_name(getattr(root_value, node.attr))
+        return node.attr
+
+    return None
+
+
+def _resolve_attribute_root(fn: Callable, node: ast.expr) -> Any | None:
+    if isinstance(node, ast.Name):
+        return fn.__globals__.get(node.id)
+    if isinstance(node, ast.Attribute):
+        parent = _resolve_attribute_root(fn, node.value)
+        if parent is not None and hasattr(parent, node.attr):
+            return getattr(parent, node.attr)
+    return None
+
+
+def _resolve_runtime_interactive_name(value: Any) -> str | None:
+    if not callable(value):
+        return None
+    module = getattr(value, "__module__", "")
+    name = getattr(value, "__name__", "")
+    if module == "agentyper._internal._interactive" and name in {"confirm", "prompt", "edit"}:
+        return name
+    return None
 
 
 def _bootstrap(format_: str) -> None:

@@ -115,7 +115,7 @@ Single-field errors:
 
 ## 5. Bypass interactive prompts
 
-agentyper CLIs never block in non-TTY. If a command contains confirmation or prompt steps:
+agentyper CLIs never block in non-TTY. Interaction flags such as `--yes`, `--no`, and `--answers` are accepted consistently, although some commands may hide them from `--help` when they are not expected to be needed:
 
 ```bash
 # Auto-confirm all confirm() calls
@@ -136,6 +136,8 @@ agentyper CLIs never block in non-TTY. If a command contains confirmation or pro
 # Pipe from stdin
 echo '{"confirms":[true]}' | <tool> delete alice --answers -
 ```
+
+If those flags are absent from `--help`, that usually means the command is expected to be non-interactive. You can still pass them defensively when you need deterministic non-TTY behavior.
 
 **Environment variables:**
 - `AGENTYPER_YES=1` — equivalent to `--yes` globally
@@ -160,7 +162,19 @@ Useful when a command fails unexpectedly and you need more context before retryi
 
 ---
 
-## 7. Dry-run for mutating commands
+## 7. Timeout overrides
+
+Some commands expose `--timeout MS` to set a wall-clock timeout for that invocation:
+
+```bash
+<tool> sync --timeout 5000
+```
+
+Only use it when it is present in `--help` or described in the schema/docs. If it is absent, do not assume the CLI supports per-invocation timeout overrides.
+
+---
+
+## 8. Dry-run for mutating commands
 
 Commands marked `mutating: true` in the schema always accept `--dry-run`:
 
@@ -178,9 +192,10 @@ Use dry-run to validate intent before committing. The response shape is identica
 <tool> --schema                          discover all commands
 <tool> <cmd> --schema                    discover one command's inputs
 <tool> <cmd> [args] --format json        structured output
-<tool> <cmd> [args] --yes                skip all confirm() calls
-<tool> <cmd> [args] --no                 deny all confirm() calls
-<tool> <cmd> [args] --answers '<json>'   pre-supply all interactive answers
+<tool> <cmd> [args] --yes                skip confirm() calls when supported
+<tool> <cmd> [args] --no                 deny confirm() calls when supported
+<tool> <cmd> [args] --answers '<json>'   pre-supply interactive answers when supported
+<tool> <cmd> [args] --timeout MS         apply timeout override when supported
 <tool> <cmd> [args] --dry-run            preview mutating command
 <tool> <cmd> [args] -v / -vv             verbose / debug logging
 AGENTYPER_FORMAT=json                    set default output format
