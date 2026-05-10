@@ -361,9 +361,7 @@ def _render_delimited(records: list[dict[str, Any]], *, delimiter: str) -> None:
         buf, fieldnames=list(records[0].keys()), extrasaction="ignore", delimiter=delimiter
     )
     writer.writeheader()
-    writer.writerows(
-        {k: ("" if v is None else str(v)) for k, v in r.items()} for r in records
-    )
+    writer.writerows({k: ("" if v is None else str(v)) for k, v in r.items()} for r in records)
     sys.stdout.write(buf.getvalue())
 
 
@@ -445,7 +443,8 @@ def echo(message: Any = "", *, err: bool = False, format_: str | None = None) ->
         render_output(message, format_=fmt)
         return
 
-    # In structured output mode, plain-text echo goes to stderr so stdout stays parseable (REQ-F-006)
+    # In structured output mode, plain-text echo goes to stderr so stdout stays parseable
+    # (REQ-F-006)
     fmt = format_ or _get_format()
     if not err and fmt in ("json", "jsonl"):
         err = True
