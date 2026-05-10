@@ -48,6 +48,7 @@ from agentyper._internal._errors import (
 )
 from agentyper._internal._logging import configure_logging
 from agentyper._internal._output import (
+    OUTPUT_FORMATS,
     clear_warnings,
     render_output,
     set_format,
@@ -130,6 +131,11 @@ class CommandInfo:
 
 def _is_ci() -> bool:
     return bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
+
+
+def _resolve_format(ns: argparse.Namespace) -> str:
+    fmt = getattr(ns, "format", "table")
+    return "json" if getattr(ns, "_json_mode", False) else fmt
 
 
 # ---------------------------------------------------------------------------
@@ -669,15 +675,32 @@ class Agentyper:
             help="Print command JSON Schema and exit",
         )
 
-        # --format  (REQ-F-003: auto-JSON in CI environments)
+        # --output (REQ-O-001) + --format backward-compat alias + --json shorthand (REQ-F-003)
         default_format = "table" if (sys.stdout.isatty() and not _is_ci()) else "json"
         env_format = os.getenv("AGENTYPER_FORMAT", default_format)
         parser.add_argument(
-            "--format",
-            choices=["table", "json", "csv"],
+            "--output",
+            "-o",
+            choices=OUTPUT_FORMATS,
             default=argparse.SUPPRESS if suppress_defaults else env_format,
+            dest="format",
             metavar="FORMAT",
-            help="Output format: table (default in TTY), json, csv",
+            help="Output format: json (default in non-TTY), jsonl, tsv, plain, table",
+        )
+        parser.add_argument(
+            "--format",
+            choices=OUTPUT_FORMATS,
+            default=argparse.SUPPRESS,
+            dest="format",
+            metavar="FORMAT",
+            help=argparse.SUPPRESS,
+        )
+        parser.add_argument(
+            "--json",
+            action="store_true",
+            default=argparse.SUPPRESS if suppress_defaults else False,
+            dest="_json_mode",
+            help="Output as JSON (shorthand for --output json)",
         )
 
         interaction_help = "Auto-confirm all prompts" if include_interaction else argparse.SUPPRESS
@@ -948,8 +971,7 @@ class Agentyper:
         )
         set_session(session)
 
-        # Resolve format
-        format_ = getattr(ns, "format", "table")
+        format_ = _resolve_format(ns)
         set_format(format_)
         set_start_time()
         clear_warnings()
@@ -1081,7 +1103,7 @@ def run(
     )
     set_session(session)
 
-    format_ = getattr(ns, "format", "table")
+    format_ = _resolve_format(ns)
     set_format(format_)
     set_start_time()
     clear_warnings()
@@ -1208,7 +1230,7 @@ def _bootstrap(format_: str) -> None:
         os.environ["NO_COLOR"] = "1"
 
     # REQ-F-056: suppress terminal width so child processes don't wrap JSON output
-    if format_ == "json":
+    if format_ in ("json", "jsonl"):
         os.environ["COLUMNS"] = "0"
     else:
         # Don't leave a stale COLUMNS=0 from a previous JSON invocation
@@ -1226,7 +1248,7 @@ def _bootstrap(format_: str) -> None:
         if _fired[0]:
             return
         _fired[0] = True
-        if format_ == "json" or not sys.stdout.isatty():
+        if format_ in ("json", "jsonl") or not sys.stdout.isatty():
             try:
                 sys.stdout.write(
                     json.dumps(
@@ -1245,7 +1267,7 @@ def _bootstrap(format_: str) -> None:
                     + "\n"
                 )
                 sys.stdout.flush()
-            except Exception:
+            except OSError:
                 pass
         os._exit(143)
 
@@ -1269,7 +1291,7 @@ def _install_timeout(timeout_ms: int, format_: str) -> None:
             return
         _timed_out[0] = True
         elapsed = int((_time.monotonic() - start) * 1000)
-        if format_ == "json" or not sys.stdout.isatty():
+        if format_ in ("json", "jsonl") or not sys.stdout.isatty():
             try:
                 sys.stdout.write(
                     json.dumps(
@@ -1289,7 +1311,7 @@ def _install_timeout(timeout_ms: int, format_: str) -> None:
                     + "\n"
                 )
                 sys.stdout.flush()
-            except Exception:
+            except OSError:
                 pass
         os._exit(int(ExitCode.TIMEOUT))
 

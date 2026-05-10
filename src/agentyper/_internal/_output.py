@@ -342,18 +342,37 @@ def _render_json(records: list[dict[str, Any]]) -> None:
     print(raw)
 
 
-def _render_csv(records: list[dict[str, Any]]) -> None:
-    """Render CSV to stdout."""
+OUTPUT_FORMATS = ("json", "jsonl", "tsv", "plain", "table", "csv")
+
+
+def _render_jsonl(records: list[dict[str, Any]]) -> None:
+    """Render JSONL to stdout — one JSON object per line, no envelope wrapper."""
+    for record in records:
+        clean = _strip_ansi_deep(record)
+        print(json.dumps(clean, default=_default_json, ensure_ascii=False))
+
+
+def _render_delimited(records: list[dict[str, Any]], *, delimiter: str) -> None:
+    """Render delimiter-separated values to stdout with a header row."""
     if not records:
         return
     buf = io.StringIO()
-    writer = csv.DictWriter(buf, fieldnames=list(records[0].keys()), extrasaction="ignore")
+    writer = csv.DictWriter(
+        buf, fieldnames=list(records[0].keys()), extrasaction="ignore", delimiter=delimiter
+    )
     writer.writeheader()
     writer.writerows(
-        {k: (str(v) if not isinstance(v, str | None.__class__) else v or "") for k, v in r.items()}
-        for r in records
+        {k: ("" if v is None else str(v)) for k, v in r.items()} for r in records
     )
     sys.stdout.write(buf.getvalue())
+
+
+def _render_csv(records: list[dict[str, Any]]) -> None:
+    _render_delimited(records, delimiter=",")
+
+
+def _render_tsv(records: list[dict[str, Any]]) -> None:
+    _render_delimited(records, delimiter="\t")
 
 
 # ---------------------------------------------------------------------------
@@ -372,15 +391,20 @@ def render_output(
 
     Args:
         data:    A single dict, a Pydantic model, or an iterable of either.
-        format_: ``"table"`` (default), ``"json"``, or ``"csv"``.
-        title:   Optional table title (only shown in table mode).
+        format_: ``"json"``, ``"jsonl"``, ``"tsv"``, ``"csv"``, ``"plain"``,
+                 or ``"table"`` (default in TTY).
+        title:   Optional table title (only shown in table/plain mode).
     """
     records = _normalise(data)
 
     if format_ == "json":
         _render_json(records)
+    elif format_ == "jsonl":
+        _render_jsonl(records)
     elif format_ == "csv":
         _render_csv(records)
+    elif format_ == "tsv":
+        _render_tsv(records)
     else:
         _render_table(records, title)
 
@@ -421,9 +445,9 @@ def echo(message: Any = "", *, err: bool = False, format_: str | None = None) ->
         render_output(message, format_=fmt)
         return
 
-    # In JSON mode, plain-text echo goes to stderr so stdout stays machine-parseable (REQ-F-006)
+    # In structured output mode, plain-text echo goes to stderr so stdout stays parseable (REQ-F-006)
     fmt = format_ or _get_format()
-    if not err and fmt == "json":
+    if not err and fmt in ("json", "jsonl"):
         err = True
     target = sys.stderr if err else sys.stdout
     print(message, file=target)
