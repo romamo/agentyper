@@ -343,6 +343,7 @@ def _render_json(records: list[dict[str, Any]]) -> None:
 
 
 OUTPUT_FORMATS = ("json", "jsonl", "tsv", "plain", "table", "csv")
+OUTPUT_FORMAT_SHORTHANDS = ("json", "csv", "tsv")
 
 
 def _render_jsonl(records: list[dict[str, Any]]) -> None:

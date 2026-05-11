@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.14] - 2026-05-11
+
+### Added
+- **`--help-full` flag**: shows all flags including hidden ones (e.g. `--format`, format shorthands) for power users and agent inspection.
+- **`global_flags` in schema**: `get_schema()` now includes a `global_flags` array listing all injected global flags with their descriptions, choices, and hidden status.
+- **Format shorthand flags**: `--json`, `--csv`, and `--tsv` are now individual shorthand flags (each sets `--output` to the corresponding format), replacing the previous boolean `--json` flag.
+
+### Fixed
+- **`IO` import**: added missing `IO` import from `typing` in `_app.py`.
+
 ## [0.1.13] - 2026-05-10
 
 ### Added

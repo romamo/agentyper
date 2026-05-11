@@ -35,7 +35,7 @@ import typing
 from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, get_type_hints
+from typing import IO, Any, get_type_hints
 
 from pydantic import ValidationError as _PydanticValidationError
 
@@ -48,6 +48,7 @@ from agentyper._internal._errors import (
 )
 from agentyper._internal._logging import configure_logging
 from agentyper._internal._output import (
+    OUTPUT_FORMAT_SHORTHANDS,
     OUTPUT_FORMATS,
     clear_warnings,
     render_output,
@@ -133,11 +134,6 @@ def _is_ci() -> bool:
     return bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
 
 
-def _resolve_format(ns: argparse.Namespace) -> str:
-    fmt = getattr(ns, "format", "table")
-    return "json" if getattr(ns, "_json_mode", False) else fmt
-
-
 # ---------------------------------------------------------------------------
 # Parser subclass — ARG_ERROR (3) on parse failures (REQ-F-002)
 # ---------------------------------------------------------------------------
@@ -171,6 +167,10 @@ class _Parser(argparse.ArgumentParser):
 # ---------------------------------------------------------------------------
 
 
+def _help_out() -> IO[str]:
+    return sys.stdout if sys.stdout.isatty() else sys.stderr
+
+
 class _HelpAction(argparse.Action):
     """Print help to stderr in non-TTY mode so stdout stays machine-parseable."""
 
@@ -196,9 +196,57 @@ class _HelpAction(argparse.Action):
         values: Any,
         option_string: str | None = None,
     ) -> None:
-        out = sys.stdout if sys.stdout.isatty() else sys.stderr
-        parser.print_help(out)
+        parser.print_help(_help_out())
         parser.exit()
+
+
+# ---------------------------------------------------------------------------
+# Help-full action — shows hidden flags too
+# ---------------------------------------------------------------------------
+
+
+class _HelpFullAction(_HelpAction):
+    """Print full help including hidden flags, then exit."""
+
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: Any,
+        option_string: str | None = None,
+    ) -> None:
+        revealed: list[argparse.Action] = []
+        for action in parser._actions:
+            if action.help == argparse.SUPPRESS and hasattr(action, "_full_help"):
+                revealed.append(action)
+                action.help = f"[hidden] {action._full_help}"
+        try:
+            parser.print_help(_help_out())
+        finally:
+            for action in revealed:
+                action.help = argparse.SUPPRESS
+        parser.exit()
+
+
+def _extract_global_flags_schema(
+    parser: argparse.ArgumentParser,
+) -> list[dict[str, Any]]:
+    """Build a list of global-flag descriptors from a parser's registered actions."""
+    result = []
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        entry: dict[str, Any] = {"flags": list(action.option_strings)}
+        if action.choices:
+            entry["choices"] = list(action.choices)
+        if action.help == argparse.SUPPRESS:
+            entry["hidden"] = True
+        if hasattr(action, "_full_help"):
+            entry["description"] = action._full_help
+        elif action.help and action.help != argparse.SUPPRESS:
+            entry["description"] = action.help
+        result.append(entry)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -497,12 +545,22 @@ class Agentyper:
 
     def get_schema(self) -> dict[str, Any]:
         """Return the full JSON Schema for this app and all sub-apps."""
-        return build_app_schema(
+        schema = build_app_schema(
             name=self.name or "",
             version=self.version,
             commands=self._commands,
             sub_apps=self._sub_apps,
         )
+        dummy = _Parser(prog=self.name, add_help=False)
+        self._inject_global_flags(
+            dummy,
+            schema_fn=lambda: {},
+            include_interaction=True,
+            include_timeout=True,
+            suppress_defaults=False,
+        )
+        schema["global_flags"] = _extract_global_flags_schema(dummy)
+        return schema
 
     # ------------------------------------------------------------------
     # argparse builder
@@ -667,6 +725,12 @@ class Agentyper:
             help="Show this help message and exit",
         )
 
+        parser.add_argument(
+            "--help-full",
+            action=_HelpFullAction,
+            help="Show all flags including hidden ones",
+        )
+
         # --schema (eager)
         parser.add_argument(
             "--schema",
@@ -687,7 +751,7 @@ class Agentyper:
             metavar="FORMAT",
             help="Output format: json (default in non-TTY), jsonl, tsv, plain, table",
         )
-        parser.add_argument(
+        _fmt_alias = parser.add_argument(
             "--format",
             choices=OUTPUT_FORMATS,
             default=argparse.SUPPRESS,
@@ -695,13 +759,17 @@ class Agentyper:
             metavar="FORMAT",
             help=argparse.SUPPRESS,
         )
-        parser.add_argument(
-            "--json",
-            action="store_true",
-            default=argparse.SUPPRESS if suppress_defaults else False,
-            dest="_json_mode",
-            help="Output as JSON (shorthand for --output json)",
-        )
+        _fmt_alias._full_help = "Alias for --output (backward compat)"
+        for _fmt in OUTPUT_FORMAT_SHORTHANDS:
+            _shorthand = parser.add_argument(
+                f"--{_fmt}",
+                action="store_const",
+                const=_fmt,
+                default=argparse.SUPPRESS,
+                dest="format",
+                help=argparse.SUPPRESS,
+            )
+            _shorthand._full_help = f"Shorthand for --output {_fmt}"
 
         interaction_help = "Auto-confirm all prompts" if include_interaction else argparse.SUPPRESS
         parser.add_argument(
@@ -971,7 +1039,7 @@ class Agentyper:
         )
         set_session(session)
 
-        format_ = _resolve_format(ns)
+        format_ = getattr(ns, "format", "table")
         set_format(format_)
         set_start_time()
         clear_warnings()
@@ -1103,7 +1171,7 @@ def run(
     )
     set_session(session)
 
-    format_ = _resolve_format(ns)
+    format_ = getattr(ns, "format", "table")
     set_format(format_)
     set_start_time()
     clear_warnings()
