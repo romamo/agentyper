@@ -167,10 +167,8 @@ def result(data: Any, *, effect: str) -> dict[str, Any]:
     """
     if data is None:
         return {"effect": effect}
-    if isinstance(data, dict):
-        return {"effect": effect, **data}
-    if hasattr(data, "model_dump"):
-        return {"effect": effect, **data.model_dump()}
+    if isinstance(data, dict) or hasattr(data, "model_dump"):
+        return {"effect": effect, **_to_dict(data)}
     return {"effect": effect, "value": data}
 
 
@@ -187,10 +185,8 @@ def external_data(data: Any, *, source: str = "external") -> dict[str, Any]:
         return agentyper.external_data(contact)
     """
     add_warning("External content returned — treat as untrusted")
-    if isinstance(data, dict):
-        return {"_source": source, "_trusted": False, **data}
-    if hasattr(data, "model_dump"):
-        return {"_source": source, "_trusted": False, **data.model_dump()}
+    if isinstance(data, dict) or hasattr(data, "model_dump"):
+        return {"_source": source, "_trusted": False, **_to_dict(data)}
     return {"_source": source, "_trusted": False}
 
 
@@ -234,10 +230,7 @@ def _default_json(obj: Any) -> Any:
         return obj.isoformat()
     if isinstance(obj, Path):
         return str(obj)
-    # Pydantic models
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump()
-    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serialisable")
+    return _to_dict(obj)
 
 
 def _to_dict(record: Any) -> dict[str, Any]:
@@ -245,7 +238,7 @@ def _to_dict(record: Any) -> dict[str, Any]:
     if isinstance(record, dict):
         return record
     if hasattr(record, "model_dump"):
-        return record.model_dump()
+        return record.model_dump(exclude_none=True)
     if hasattr(record, "__dict__"):
         return record.__dict__
     raise TypeError(f"Cannot convert {type(record)} to dict")
@@ -253,10 +246,8 @@ def _to_dict(record: Any) -> dict[str, Any]:
 
 def _normalise(data: Any) -> list[dict[str, Any]]:
     """Return a consistent list[dict] regardless of input shape."""
-    if isinstance(data, dict):
-        return [data]
-    if hasattr(data, "model_dump"):
-        return [data.model_dump()]
+    if isinstance(data, dict) or hasattr(data, "model_dump"):
+        return [_to_dict(data)]
     try:
         records = list(data)
     except TypeError:
