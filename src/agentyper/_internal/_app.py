@@ -733,8 +733,14 @@ class Agentyper:
             schema_fn=lambda: {
                 "type": "object",
                 "properties": {
-                    "ignore_errors": {"type": "boolean", "description": "Continue after a line error instead of stopping"},
-                    "dry_run": {"type": "boolean", "description": "Forward --dry-run to each dispatched mutating command"},
+                    "ignore_errors": {
+                        "type": "boolean",
+                        "description": "Continue after a line error instead of stopping",
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Forward --dry-run to each dispatched mutating command",
+                    },
                 },
             },
             include_interaction=False,

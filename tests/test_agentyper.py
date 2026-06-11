@@ -778,7 +778,9 @@ def _make_exec_app() -> agentyper.Agentyper:
     return app
 
 
-def _exec_stdin(app: agentyper.Agentyper, lines: list[dict], flags: list[str] | None = None) -> Result:
+def _exec_stdin(
+    app: agentyper.Agentyper, lines: list[dict], flags: list[str] | None = None
+) -> Result:
     """Helper: invoke exec with a fake JSONL stdin; returns the runner Result."""
     stdin_text = "\n".join(json.dumps(line) for line in lines) + "\n"
     with patch("sys.stdin", io.StringIO(stdin_text)):
@@ -786,7 +788,7 @@ def _exec_stdin(app: agentyper.Agentyper, lines: list[dict], flags: list[str] | 
 
 
 def _output_lines(res: Result) -> list[str]:
-    return [l for l in res.stdout.strip().splitlines() if l]
+    return [line for line in res.stdout.strip().splitlines() if line]
 
 
 class TestExecCommand:
@@ -820,10 +822,13 @@ class TestExecCommand:
 
     def test_exec_multiple_lines(self) -> None:
         app = _make_exec_app()
-        res = _exec_stdin(app, [
-            {"_cmd": "greet", "name": "Alice"},
-            {"_cmd": "greet", "name": "Bob"},
-        ])
+        res = _exec_stdin(
+            app,
+            [
+                {"_cmd": "greet", "name": "Alice"},
+                {"_cmd": "greet", "name": "Bob"},
+            ],
+        )
         assert res.exit_code == 0
         lines = _output_lines(res)
         assert len(lines) == 2
@@ -845,11 +850,14 @@ class TestExecCommand:
 
     def test_exec_stops_on_error_by_default(self) -> None:
         app = _make_exec_app()
-        res = _exec_stdin(app, [
-            {"_cmd": "greet", "name": "Alice"},
-            {"_cmd": "greet"},           # missing required 'name' → arg error
-            {"_cmd": "greet", "name": "Bob"},
-        ])
+        res = _exec_stdin(
+            app,
+            [
+                {"_cmd": "greet", "name": "Alice"},
+                {"_cmd": "greet"},  # missing required 'name' → arg error
+                {"_cmd": "greet", "name": "Bob"},
+            ],
+        )
         assert res.exit_code != 0
         lines = _output_lines(res)
         # Only 2 output lines: line 1 succeeded, line 2 failed and exec stopped
@@ -859,11 +867,15 @@ class TestExecCommand:
 
     def test_exec_ignore_errors_continues(self) -> None:
         app = _make_exec_app()
-        res = _exec_stdin(app, [
-            {"_cmd": "greet", "name": "Alice"},
-            {"_cmd": "greet"},           # fails
-            {"_cmd": "greet", "name": "Bob"},
-        ], flags=["--ignore-errors"])
+        res = _exec_stdin(
+            app,
+            [
+                {"_cmd": "greet", "name": "Alice"},
+                {"_cmd": "greet"},  # fails
+                {"_cmd": "greet", "name": "Bob"},
+            ],
+            flags=["--ignore-errors"],
+        )
         assert res.exit_code == int(agentyper.ExitCode.PARTIAL_FAILURE)
         lines = _output_lines(res)
         assert len(lines) == 3
@@ -944,9 +956,12 @@ class TestExecCommand:
 
     def test_exec_all_succeed_exits_zero(self) -> None:
         app = _make_exec_app()
-        res = _exec_stdin(app, [
-            {"_cmd": "greet", "name": "A"},
-            {"_cmd": "greet", "name": "B"},
-            {"_cmd": "greet", "name": "C"},
-        ])
+        res = _exec_stdin(
+            app,
+            [
+                {"_cmd": "greet", "name": "A"},
+                {"_cmd": "greet", "name": "B"},
+                {"_cmd": "greet", "name": "C"},
+            ],
+        )
         assert res.exit_code == 0

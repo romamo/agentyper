@@ -11,13 +11,14 @@ import sys
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, get_type_hints
 
+from rich.console import Console
+
 import agentyper._internal._errors as _err
 import agentyper._internal._output as _out
 from agentyper._internal._app import _list_inner_type
 from agentyper._internal._errors import ExitCode
 from agentyper._internal._params import ArgumentInfo, OptionInfo
 from agentyper._internal._schema import _GLOBAL_PARAMS
-from rich.console import Console
 
 if TYPE_CHECKING:
     from agentyper._internal._app import Agentyper, CommandInfo
@@ -38,7 +39,7 @@ def _resolve_cmd_info(app: Agentyper, parts: list[str]) -> CommandInfo | None:
     return None
 
 
-@functools.lru_cache(maxsize=None)
+@functools.cache
 def _fn_meta(fn: Callable) -> tuple[dict[str, Any], inspect.Signature]:
     """Return (type_hints, signature) for *fn*, cached per function identity."""
     try:
@@ -89,7 +90,11 @@ def _payload_to_cmd_args(fn: Callable, payload: dict[str, Any]) -> list[str]:
         if isinstance(default, OptionInfo):
             flag = default.param_decls[0] if default.param_decls else "--" + pname.replace("_", "-")
             _append_flag(flags, flag, annotation, value)
-        elif isinstance(default, ArgumentInfo) or default is inspect.Parameter.empty or default is ...:
+        elif (
+            isinstance(default, ArgumentInfo)
+            or default is inspect.Parameter.empty
+            or default is ...
+        ):
             if _list_inner_type(annotation) is not None and isinstance(value, list):
                 positionals.extend(str(v) for v in value)
             else:
