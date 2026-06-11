@@ -452,6 +452,7 @@ class Agentyper:
         interactive: bool | None = None,
         enable_timeout: bool | None = None,
         default_timeout_ms: int = 0,
+        exec: bool = True,
     ) -> None:
         self.name = name
         self.version = version
@@ -460,6 +461,7 @@ class Agentyper:
         self.interactive = interactive
         self.enable_timeout = enable_timeout
         self.default_timeout_ms = default_timeout_ms
+        self._exec_enabled = exec
         self._commands: dict[str, CommandInfo] = {}
         self._sub_apps: dict[str, Agentyper] = {}
         self._callback_fn: Callable | None = None
@@ -644,6 +646,9 @@ class Agentyper:
                 )
                 sub_app._mount_into(sub, callbacks=my_callbacks)
 
+            if self._exec_enabled and "exec" not in self._commands and "exec" not in self._sub_apps:
+                self._add_exec_subparser(subparsers)
+
         return parser
 
     def _mount_into(self, parent: argparse.ArgumentParser, callbacks: list[Callable]) -> None:
@@ -706,6 +711,51 @@ class Agentyper:
                     add_help=False,
                 )
                 sub_app._mount_into(sub, callbacks=my_callbacks)
+
+    def _add_exec_subparser(self, subparsers: Any) -> None:
+        """Register the built-in ``exec`` subcommand on *subparsers*."""
+        exec_parser = subparsers.add_parser(
+            "exec",
+            help="Read JSONL from stdin and dispatch each line to a subcommand",
+            description=(
+                "Read a JSONL stream from stdin and dispatch each line to the\n"
+                "appropriate subcommand in-process.\n\n"
+                "Each line must be a JSON object with:\n"
+                "  _cmd   dot-separated subcommand path (e.g. 'account.create')\n"
+                "  _opts  optional per-line flag overrides\n"
+                "  ...    remaining fields become --flag value pairs"
+            ),
+            formatter_class=argparse.RawDescriptionHelpFormatter,
+            add_help=False,
+        )
+        self._inject_global_flags(
+            exec_parser,
+            schema_fn=lambda: {
+                "type": "object",
+                "properties": {
+                    "ignore_errors": {"type": "boolean", "description": "Continue after a line error instead of stopping"},
+                    "dry_run": {"type": "boolean", "description": "Forward --dry-run to each dispatched mutating command"},
+                },
+            },
+            include_interaction=False,
+            include_timeout=False,
+            suppress_defaults=True,
+        )
+        exec_parser.add_argument(
+            "--ignore-errors",
+            action="store_true",
+            default=False,
+            dest="ignore_errors",
+            help="Continue processing after a line error instead of stopping",
+        )
+        exec_parser.add_argument(
+            "--dry-run",
+            action="store_true",
+            default=False,
+            dest="dry_run",
+            help="Forward --dry-run to each dispatched mutating command",
+        )
+        exec_parser.set_defaults(_cmd_info=None, _callbacks=[], _is_exec=True)
 
     def _inject_global_flags(
         self,
@@ -1073,6 +1123,17 @@ class Agentyper:
         with _use_context(ctx):
             for cb in callbacks:
                 _call_fn(cb, ns, format_, ctx=ctx)
+
+            # Built-in exec command
+            if getattr(ns, "_is_exec", False):
+                from agentyper._internal._exec import run_exec  # noqa: PLC0415
+
+                run_exec(
+                    self,
+                    ignore_errors=getattr(ns, "ignore_errors", False),
+                    dry_run=getattr(ns, "dry_run", False),
+                )
+                return
 
             if cmd_info is None:
                 if not self.invoke_without_command and not callbacks:

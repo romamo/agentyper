@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 import agentyper
-from agentyper.testing import CliRunner
+from agentyper.testing import CliRunner, Result
 
 runner = CliRunner()
 
@@ -753,3 +755,198 @@ class TestAdvancedFeatures:
 
         res = runner.invoke(app, ["cmd", "0"])
         assert res.exit_code == agentyper.EXIT_VALIDATION
+
+
+# ---------------------------------------------------------------------------
+# Built-in exec command tests
+# ---------------------------------------------------------------------------
+
+
+def _make_exec_app() -> agentyper.Agentyper:
+    app = agentyper.Agentyper(name="myapp")
+
+    @app.command()
+    def greet(name: str) -> None:
+        """Greet someone."""
+        agentyper.output({"name": name, "message": f"Hello {name}"})
+
+    @app.command(mutating=True)
+    def create(label: str, dry_run: bool = False) -> None:
+        """Create a resource."""
+        agentyper.output({"label": label, "dry_run": dry_run})
+
+    return app
+
+
+def _exec_stdin(app: agentyper.Agentyper, lines: list[dict], flags: list[str] | None = None) -> Result:
+    """Helper: invoke exec with a fake JSONL stdin; returns the runner Result."""
+    stdin_text = "\n".join(json.dumps(line) for line in lines) + "\n"
+    with patch("sys.stdin", io.StringIO(stdin_text)):
+        return runner.invoke(app, ["exec"] + (flags or []))
+
+
+def _output_lines(res: Result) -> list[str]:
+    return [l for l in res.stdout.strip().splitlines() if l]
+
+
+class TestExecCommand:
+    def test_exec_appears_in_help(self) -> None:
+        app = _make_exec_app()
+        res = runner.invoke(app, ["--help"])
+        assert "exec" in (res.stdout + res.stderr)
+
+    def test_exec_disabled_via_flag(self) -> None:
+        app = agentyper.Agentyper(name="myapp", exec=False)
+
+        @app.command()
+        def greet(name: str) -> None:
+            """Greet."""
+
+        res = runner.invoke(app, ["--help"])
+        assert "exec" not in (res.stdout + res.stderr)
+
+    def test_exec_single_line_success(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [{"_cmd": "greet", "name": "Alice"}])
+        assert res.exit_code == 0
+        lines = _output_lines(res)
+        assert len(lines) == 1
+        out = json.loads(lines[0])
+        assert out["ok"] is True
+        assert out["exit_code"] == 0
+        assert out["line"] == 1
+        assert out["cmd"] == "greet"
+        assert out["result"]["data"]["name"] == "Alice"
+
+    def test_exec_multiple_lines(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [
+            {"_cmd": "greet", "name": "Alice"},
+            {"_cmd": "greet", "name": "Bob"},
+        ])
+        assert res.exit_code == 0
+        lines = _output_lines(res)
+        assert len(lines) == 2
+        first = json.loads(lines[0])
+        second = json.loads(lines[1])
+        assert first["line"] == 1
+        assert second["line"] == 2
+        assert first["result"]["data"]["name"] == "Alice"
+        assert second["result"]["data"]["name"] == "Bob"
+
+    def test_exec_skips_blank_lines(self) -> None:
+        app = _make_exec_app()
+        stdin_text = "\n" + json.dumps({"_cmd": "greet", "name": "Alice"}) + "\n\n"
+        with patch("sys.stdin", io.StringIO(stdin_text)):
+            res = runner.invoke(app, ["exec"])
+        assert res.exit_code == 0
+        lines = _output_lines(res)
+        assert len(lines) == 1
+
+    def test_exec_stops_on_error_by_default(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [
+            {"_cmd": "greet", "name": "Alice"},
+            {"_cmd": "greet"},           # missing required 'name' → arg error
+            {"_cmd": "greet", "name": "Bob"},
+        ])
+        assert res.exit_code != 0
+        lines = _output_lines(res)
+        # Only 2 output lines: line 1 succeeded, line 2 failed and exec stopped
+        assert len(lines) == 2
+        assert json.loads(lines[0])["ok"] is True
+        assert json.loads(lines[1])["ok"] is False
+
+    def test_exec_ignore_errors_continues(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [
+            {"_cmd": "greet", "name": "Alice"},
+            {"_cmd": "greet"},           # fails
+            {"_cmd": "greet", "name": "Bob"},
+        ], flags=["--ignore-errors"])
+        assert res.exit_code == int(agentyper.ExitCode.PARTIAL_FAILURE)
+        lines = _output_lines(res)
+        assert len(lines) == 3
+        assert json.loads(lines[0])["ok"] is True
+        assert json.loads(lines[1])["ok"] is False
+        assert json.loads(lines[2])["ok"] is True
+
+    def test_exec_invalid_json_line(self) -> None:
+        app = _make_exec_app()
+        stdin_text = "not valid json\n"
+        with patch("sys.stdin", io.StringIO(stdin_text)):
+            res = runner.invoke(app, ["exec"])
+        assert res.exit_code != 0
+        out = json.loads(res.stdout.strip())
+        assert out["ok"] is False
+        assert "error" in out
+
+    def test_exec_missing_cmd_field(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [{"name": "Alice"}])
+        assert res.exit_code != 0
+        out = json.loads(res.stdout.strip())
+        assert out["ok"] is False
+        assert "_cmd" in out["error"]
+
+    def test_exec_opts_forwarded_as_flags(self) -> None:
+        app = _make_exec_app()
+        dry_runs: list[bool] = []
+
+        @app.command(mutating=True)
+        def update(label: str, dry_run: bool = False) -> None:
+            """Update."""
+            dry_runs.append(dry_run)
+            agentyper.output({"label": label})
+
+        res = _exec_stdin(app, [{"_cmd": "update", "_opts": {"dry_run": True}, "label": "x"}])
+        assert res.exit_code == 0
+        assert dry_runs == [True]
+
+    def test_exec_dry_run_flag_forwarded_to_mutating(self) -> None:
+        app = _make_exec_app()
+        dry_runs: list[bool] = []
+
+        @app.command(mutating=True)
+        def write(label: str, dry_run: bool = False) -> None:
+            """Write."""
+            dry_runs.append(dry_run)
+            agentyper.output({"label": label})
+
+        res = _exec_stdin(app, [{"_cmd": "write", "label": "x"}], flags=["--dry-run"])
+        assert res.exit_code == 0
+        assert dry_runs == [True]
+
+    def test_exec_dry_run_flag_not_forwarded_to_safe(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [{"_cmd": "greet", "name": "Alice"}], flags=["--dry-run"])
+        # safe command: --dry-run is NOT forwarded → no argparse error
+        assert res.exit_code == 0
+
+    def test_exec_dot_path_routes_to_sub_app(self) -> None:
+        app = agentyper.Agentyper(name="root")
+        sub = agentyper.Agentyper(name="account")
+        names: list[str] = []
+
+        @sub.command()
+        def create(name: str) -> None:
+            """Create account."""
+            names.append(name)
+            agentyper.output({"name": name})
+
+        app.add_agentyper(sub, name="account")
+
+        res = _exec_stdin(app, [{"_cmd": "account.create", "name": "Assets:Bank"}])
+        assert res.exit_code == 0
+        assert names == ["Assets:Bank"]
+        out = json.loads(res.stdout.strip())
+        assert out["ok"] is True
+
+    def test_exec_all_succeed_exits_zero(self) -> None:
+        app = _make_exec_app()
+        res = _exec_stdin(app, [
+            {"_cmd": "greet", "name": "A"},
+            {"_cmd": "greet", "name": "B"},
+            {"_cmd": "greet", "name": "C"},
+        ])
+        assert res.exit_code == 0
