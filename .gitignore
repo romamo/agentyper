@@ -287,3 +287,4 @@ tmp/
 
 # Added by oss-package-engineer
 *.pyc
+.gstack/
