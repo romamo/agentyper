@@ -594,7 +594,7 @@ class Agentyper:
             subparsers = parser.add_subparsers(
                 dest="_command", metavar="COMMAND", parser_class=_Parser
             )
-            subparsers.required = not self.invoke_without_command
+            subparsers.required = False
 
             for cmd_name, cmd_info in self._commands.items():
 
@@ -666,8 +666,10 @@ class Agentyper:
         self._add_callback_params(parent, my_callbacks, suppress_defaults=True)
 
         if self._commands or self._sub_apps:
-            subparsers = parent.add_subparsers(dest="_command", metavar="COMMAND")
-            subparsers.required = True
+            subparsers = parent.add_subparsers(
+                dest="_command", metavar="COMMAND", parser_class=_Parser
+            )
+            subparsers.required = False
             for cmd_name, cmd_info in self._commands.items():
 
                 def _sub_cmd_schema_fn(ci: CommandInfo = cmd_info) -> dict[str, Any]:
@@ -1087,6 +1089,21 @@ class Agentyper:
 
         configure_logging(getattr(ns, "verbose", 0))
 
+        cmd_info: CommandInfo | None = getattr(ns, "_cmd_info", None)
+        callbacks: list[Callable] = getattr(ns, "_callbacks", [])
+
+        if not callbacks and self._callback_fn and self.invoke_without_command:
+            callbacks = [self._callback_fn]
+
+        if (
+            cmd_info is None
+            and not callbacks
+            and not self.invoke_without_command
+            and not getattr(ns, "_is_exec", False)
+        ):
+            parser.print_help()
+            parser.exit()
+
         # Set up interactive session
         session = InteractiveSession.from_parsed(
             auto_yes=getattr(ns, "yes", False),
@@ -1100,12 +1117,6 @@ class Agentyper:
         set_start_time()
         clear_warnings()
         _bootstrap(format_)
-
-        cmd_info: CommandInfo | None = getattr(ns, "_cmd_info", None)
-        callbacks: list[Callable] = getattr(ns, "_callbacks", [])
-
-        if not cmd_info and not callbacks and self._callback_fn:
-            callbacks = [self._callback_fn]
 
         # REQ-F-011: resolve effective timeout (env override > per-command > app default)
         effective_timeout = (
@@ -1142,8 +1153,6 @@ class Agentyper:
                 return
 
             if cmd_info is None:
-                if not self.invoke_without_command and not callbacks:
-                    parser.print_help()
                 return
 
             _install_timeout(effective_timeout, format_)

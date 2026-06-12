@@ -73,7 +73,7 @@ def _execute_module(module: Any, target_args: list[str], module_name: str) -> No
     target_app(target_args)
 
 
-@app.callback(invoke_without_command=True)
+@app.callback(invoke_without_command=False)
 def callback(
     path_or_module: str | None = agentyper.Argument(
         None, metavar="[PATH_OR_MODULE]", help="Path to Python script or module to run."
