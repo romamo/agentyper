@@ -6,8 +6,8 @@ Implements REQ-F-001: Standard Exit Code Table (14 named codes).
 Exit code table (from CLI Agent Spec):
   0  SUCCESS          — operation completed as intended
   1  GENERAL_ERROR    — unclassified failure; use specific code when available
-  2  PARTIAL_FAILURE  — operation ran, partial writes occurred; not retryable
-  3  ARG_ERROR        — input validation failed before any side effect; retryable
+  2  ARG_ERROR        — input validation failed before any side effect; retryable
+  3  PARTIAL_FAILURE  — operation ran, partial writes occurred; not retryable
   4  PRECONDITION     — required precondition not met
   5  NOT_FOUND        — requested resource does not exist
   6  CONFLICT         — resource already exists or conflicts
@@ -48,8 +48,8 @@ if TYPE_CHECKING:
 class ExitCode(IntEnum):
     SUCCESS = 0
     GENERAL_ERROR = 1
-    PARTIAL_FAILURE = 2
-    ARG_ERROR = 3
+    ARG_ERROR = 2
+    PARTIAL_FAILURE = 3
     PRECONDITION = 4
     NOT_FOUND = 5
     CONFLICT = 6
@@ -183,12 +183,12 @@ EXIT_CODE_TABLE: dict[int, ExitCodeEntry] = {
 
 # ---------------------------------------------------------------------------
 # Backward-compatible aliases
-# EXIT_VALIDATION → ARG_ERROR (3)  — validation failure, zero side effects
+# EXIT_VALIDATION → ARG_ERROR (2)  — validation failure, zero side effects
 # EXIT_SYSTEM     → GENERAL_ERROR (1) — unclassified external failure
 # ---------------------------------------------------------------------------
 
 EXIT_SUCCESS: int = ExitCode.SUCCESS  # 0
-EXIT_VALIDATION: int = ExitCode.ARG_ERROR  # 3  (was 1 — see CHANGELOG)
+EXIT_VALIDATION: int = ExitCode.ARG_ERROR  # 2  (was 3 — see CHANGELOG)
 EXIT_SYSTEM: int = ExitCode.GENERAL_ERROR  # 1  (was 2 — see CHANGELOG)
 
 _err_console = Console(stderr=True)
@@ -255,7 +255,7 @@ def exit_error(
 
 def format_pydantic_error(exc: object, format_: str = "table") -> NoReturn:
     """
-    Serialize a Pydantic ValidationError to a structured error and exit ARG_ERROR (3).
+    Serialize a Pydantic ValidationError to a structured error and exit ARG_ERROR (2).
 
     Args:
         exc:     A pydantic.ValidationError instance.

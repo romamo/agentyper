@@ -44,6 +44,7 @@ from agentyper._internal._errors import (
     EXIT_SUCCESS,
     ExitCode,
     ExitCodeEntry,
+    exit_error,
     format_pydantic_error,
 )
 from agentyper._internal._logging import configure_logging
@@ -135,31 +136,23 @@ def _is_ci() -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Parser subclass — ARG_ERROR (3) on parse failures (REQ-F-002)
+# Parser subclass — ARG_ERROR (2) on parse failures (REQ-F-002)
 # ---------------------------------------------------------------------------
 
 
 class _Parser(argparse.ArgumentParser):
-    """ArgumentParser that exits with ARG_ERROR (3) instead of argparse's 2."""
+    """ArgumentParser that exits ARG_ERROR (2) on argument errors.
+
+    Both TTY and non-TTY exit with ExitCode.ARG_ERROR (2); output format differs:
+    TTY emits plain text, non-TTY emits a JSON envelope on stderr.
+    """
 
     def error(self, message: str) -> None:
         if sys.stderr.isatty():
             self.print_usage(sys.stderr)
-            self.exit(int(ExitCode.ARG_ERROR), f"{self.prog}: error: {message}\n")
+            self.exit(ExitCode.ARG_ERROR, f"{self.prog}: error: {message}\n")
         else:
-            print(
-                json.dumps(
-                    {
-                        "error": True,
-                        "error_type": "Error",
-                        "message": message,
-                        "exit_code": int(ExitCode.ARG_ERROR),
-                        "phase": "validation",
-                    }
-                ),
-                file=sys.stderr,
-            )
-            self.exit(int(ExitCode.ARG_ERROR))
+            exit_error(message, code=ExitCode.ARG_ERROR)
 
 
 # ---------------------------------------------------------------------------
