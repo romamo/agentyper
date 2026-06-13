@@ -666,6 +666,7 @@ class Agentyper:
         self._add_callback_params(parent, my_callbacks, suppress_defaults=True)
 
         if self._commands or self._sub_apps:
+            parent.set_defaults(_help_parser=parent)
             subparsers = parent.add_subparsers(
                 dest="_command", metavar="COMMAND", parser_class=_Parser
             )
@@ -1106,7 +1107,8 @@ class Agentyper:
             and not self.invoke_without_command
             and not getattr(ns, "_is_exec", False)
         ):
-            parser.print_help()
+            help_parser = getattr(ns, "_help_parser", parser)
+            help_parser.print_help()
             parser.exit()
 
         # Set up interactive session
