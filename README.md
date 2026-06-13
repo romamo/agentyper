@@ -108,6 +108,51 @@ This keeps `--help` output compact for simple non-interactive CLIs while still l
 **If you are an agent consuming an agentyper CLI, read [docs/for-agents.md](docs/for-agents.md)** for schema discovery, error handling, and the full flag reference.  
 **If you are building a CLI with agentyper, read [docs/for-developers.md](docs/for-developers.md)** for patterns, best practices, and a pre-ship checklist.
 
+## Batch Execution (`exec`)
+
+Every agentyper app ships a built-in `exec` command that reads a JSONL stream from stdin and dispatches each line to the appropriate subcommand in-process:
+
+```bash
+cat commands.jsonl | my-tool exec
+```
+
+Each line is a JSON object:
+
+```jsonl
+{"_cmd": "account.create", "name": "Assets:Bank", "open_date": "2024-01-01"}
+{"_cmd": "transaction.add", "_opts": {"draft": true}, "date": "2024-01-15"}
+```
+
+| Field | Meaning |
+|---|---|
+| `_cmd` | Dot-separated subcommand path (`"account.create"` → `account create`) |
+| `_opts` | Per-line flag overrides (`{"draft": true}` → `--draft`) |
+| everything else | Mapped to positional or flag args based on the command's signature |
+
+Each line emits one JSON result to stdout:
+
+```jsonl
+{"ok": true,  "exit_code": 0, "line": 1, "cmd": "account.create", "result": {...}}
+{"ok": false, "exit_code": 2, "line": 2, "cmd": "transaction.add", "error": "..."}
+```
+
+### Global flag forwarding
+
+Any unrecognised flag passed to `exec` is forwarded verbatim to every dispatched command:
+
+```bash
+cat commands.jsonl | my-tool exec --target ledger.beancount
+```
+
+All commands in the batch must accept the forwarded flag; a command that does not will fail with exit code 2. Use per-line `_opts` for flags that apply only to some commands — they take precedence over forwarded flags when the same key appears in both.
+
+### Exec-owned flags
+
+| Flag | Behaviour |
+|---|---|
+| `--dry-run` | Injected into mutating commands only; non-mutating commands are unaffected |
+| `--ignore-errors` | Continue processing after a line error instead of stopping |
+
 ## Agent Ergonomics
 
 | Feature | agentyper | Typer |
