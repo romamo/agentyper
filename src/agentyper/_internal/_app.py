@@ -725,7 +725,10 @@ class Agentyper:
                 "Each line must be a JSON object with:\n"
                 "  _cmd   dot-separated subcommand path (e.g. 'account.create')\n"
                 "  _opts  optional per-line flag overrides\n"
-                "  ...    remaining fields become --flag value pairs"
+                "  ...    remaining fields become --flag value pairs\n\n"
+                "Any unrecognised flags passed to exec are forwarded verbatim to every\n"
+                "dispatched command. All commands in the batch must accept them.\n"
+                "Use per-line _opts for flags that apply only to some commands."
             ),
             formatter_class=argparse.RawDescriptionHelpFormatter,
             add_help=False,
@@ -1085,7 +1088,9 @@ class Agentyper:
     def __call__(self, args: list[str] | None = None) -> None:
         """Parse arguments and dispatch to the appropriate command."""
         parser = self._build_parser()
-        ns = parser.parse_args(args)
+        ns, extra_args = parser.parse_known_args(args)
+        if extra_args and not getattr(ns, "_is_exec", False):
+            parser.error(f"unrecognized arguments: {' '.join(extra_args)}")
 
         configure_logging(getattr(ns, "verbose", 0))
 
@@ -1149,6 +1154,7 @@ class Agentyper:
                     self,
                     ignore_errors=getattr(ns, "ignore_errors", False),
                     dry_run=getattr(ns, "dry_run", False),
+                    extra_args=extra_args,
                 )
                 return
 

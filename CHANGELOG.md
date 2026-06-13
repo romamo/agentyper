@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.18] - 2026-06-13
+
+### Added
+- **`exec` global flag forwarding**: any unrecognised flag passed to `exec` is now forwarded verbatim to every dispatched command (e.g. `bean exec --target foo.beancount`). Per-line `_opts` take precedence when the same key appears in both. All commands in the batch must accept the forwarded flags.
+
+## [0.1.17] - 2026-06-12
+
 ## [0.1.16] - 2026-06-12
 
 ### Added

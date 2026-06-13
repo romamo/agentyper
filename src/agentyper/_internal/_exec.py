@@ -160,6 +160,7 @@ def run_exec(
     *,
     ignore_errors: bool = False,
     dry_run: bool = False,
+    extra_args: list[str] | None = None,
 ) -> None:
     """Read JSONL from stdin; dispatch each line to *app* in-process.
 
@@ -179,9 +180,17 @@ def run_exec(
         {"ok": true,  "exit_code": 0, "line": 1, "cmd": "account.create", "result": {...}}
         {"ok": false, "exit_code": 5, "line": 2, "cmd": "account.delete", "error": "..."}
 
-    Flags:
+    Flags (exec-owned, not forwarded verbatim):
       --ignore-errors  Continue after a line error instead of stopping.
-      --dry-run        Forward ``--dry-run`` to each dispatched mutating command.
+      --dry-run        Inject ``--dry-run`` into mutating commands only; non-mutating
+                       commands are unaffected. This flag is consumed by exec and never
+                       passed through as a raw argument.
+
+    Extra flags (forwarded verbatim to every dispatched command):
+      Any other flags passed to ``exec`` are appended to each command's arg list.
+      Every command in the batch must accept them; a command that does not will fail
+      with exit code 2. Use per-line ``_opts`` for flags that apply only to some commands.
+      Per-line ``_opts`` take precedence over extra flags when the same key appears in both.
     """
     any_failed = False
 
@@ -223,7 +232,13 @@ def run_exec(
             else _dict_to_flags(payload)
         )
 
-        args = cmd_parts + _dict_to_flags(opts) + payload_args + ["--format", "json"]
+        args = (
+            cmd_parts
+            + (extra_args or [])
+            + _dict_to_flags(opts)
+            + payload_args
+            + ["--format", "json"]
+        )
 
         stdout_str, stderr_str, exit_code = _capture_invoke(app, args)
 

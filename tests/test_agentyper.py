@@ -778,6 +778,16 @@ def _make_exec_app() -> agentyper.Agentyper:
     return app
 
 
+def _make_ping_app() -> agentyper.Agentyper:
+    app = agentyper.Agentyper(name="myapp")
+
+    @app.command()
+    def ping(prefix: str = "hi") -> None:
+        agentyper.output({"prefix": prefix})
+
+    return app
+
+
 def _exec_stdin(
     app: agentyper.Agentyper, lines: list[dict], flags: list[str] | None = None
 ) -> Result:
@@ -965,3 +975,33 @@ class TestExecCommand:
             ],
         )
         assert res.exit_code == 0
+
+    def test_exec_extra_args_forwarded_to_commands(self) -> None:
+        res = _exec_stdin(
+            _make_ping_app(),
+            [{"_cmd": "ping"}, {"_cmd": "ping"}],
+            flags=["--prefix", "hello"],
+        )
+        assert res.exit_code == 0
+        lines = _output_lines(res)
+        assert len(lines) == 2
+        for line in lines:
+            out = json.loads(line)
+            assert out["ok"] is True
+            assert out["result"]["data"]["prefix"] == "hello"
+
+    def test_exec_per_line_opts_override_extra_args(self) -> None:
+        res = _exec_stdin(
+            _make_ping_app(),
+            [
+                {"_cmd": "ping"},
+                {"_cmd": "ping", "_opts": {"prefix": "override"}},
+            ],
+            flags=["--prefix", "global"],
+        )
+        assert res.exit_code == 0
+        lines = _output_lines(res)
+        out0 = json.loads(lines[0])
+        out1 = json.loads(lines[1])
+        assert out0["result"]["data"]["prefix"] == "global"
+        assert out1["result"]["data"]["prefix"] == "override"
