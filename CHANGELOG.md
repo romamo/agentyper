@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.20] - 2026-06-19
+
+### Added
+- **`exec --schema` routing table**: calling `exec --schema` with no argument now prints a flat routing table of all registered commands with their descriptions and mutating flags.
+- **`exec --schema CMD_PATH`**: passing a dot-notation command path (e.g. `exec --schema account.create`) prints the full JSON Schema for that specific command's inputs.
+- **TTY guard on `exec`**: invoking `exec` without piped stdin now exits immediately with `ARG_ERROR` (exit code 2) and an explanatory message instead of hanging.
+
 ## [0.1.19] - 2026-06-13
 
 ### Fixed

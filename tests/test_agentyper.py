@@ -1005,3 +1005,58 @@ class TestExecCommand:
         out1 = json.loads(lines[1])
         assert out0["result"]["data"]["prefix"] == "global"
         assert out1["result"]["data"]["prefix"] == "override"
+
+    def test_exec_schema_routing_table(self) -> None:
+        app = _make_exec_app()
+        res = runner.invoke(app, ["exec", "--schema"])
+        assert res.exit_code == 0
+        table = json.loads(res.stdout)
+        assert "greet" in table
+        assert "create" in table
+        assert table["greet"]["mutating"] is False
+        assert table["create"]["mutating"] is True
+        assert "description" in table["greet"]
+
+    def test_exec_schema_single_command(self) -> None:
+        app = _make_exec_app()
+        res = runner.invoke(app, ["exec", "--schema", "greet"])
+        assert res.exit_code == 0
+        schema = json.loads(res.stdout)
+        assert schema["type"] == "object"
+        assert "name" in schema["properties"]
+        assert "name" in schema["required"]
+
+    def test_exec_schema_sub_app_routing_table(self) -> None:
+        app = agentyper.Agentyper(name="myapp")
+        sub = agentyper.Agentyper(name="account")
+
+        @sub.command(mutating=True)
+        def create(name: str) -> None:
+            """Create account."""
+
+        app.add_agentyper(sub, name="account")
+        res = runner.invoke(app, ["exec", "--schema"])
+        assert res.exit_code == 0
+        table = json.loads(res.stdout)
+        assert "account.create" in table
+        assert table["account.create"]["mutating"] is True
+
+    def test_exec_schema_sub_app_single_command(self) -> None:
+        app = agentyper.Agentyper(name="myapp")
+        sub = agentyper.Agentyper(name="account")
+
+        @sub.command()
+        def list_(limit: int = 10) -> None:
+            """List accounts."""
+
+        app.add_agentyper(sub, name="account")
+        res = runner.invoke(app, ["exec", "--schema", "account.list"])
+        assert res.exit_code == 0
+        schema = json.loads(res.stdout)
+        assert schema["type"] == "object"
+        assert "limit" in schema["properties"]
+
+    def test_exec_schema_unknown_path_exits_arg_error(self) -> None:
+        app = _make_exec_app()
+        res = runner.invoke(app, ["exec", "--schema", "no.such.cmd"])
+        assert res.exit_code == 2

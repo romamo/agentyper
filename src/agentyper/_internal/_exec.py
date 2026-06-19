@@ -18,13 +18,34 @@ import agentyper._internal._output as _out
 from agentyper._internal._app import _list_inner_type
 from agentyper._internal._errors import ExitCode
 from agentyper._internal._params import ArgumentInfo, OptionInfo
-from agentyper._internal._schema import _GLOBAL_PARAMS
+from agentyper._internal._schema import _GLOBAL_PARAMS, fn_to_input_schema
 
 if TYPE_CHECKING:
     from agentyper._internal._app import Agentyper, CommandInfo
 
 _SKIP_PARAMS = _GLOBAL_PARAMS | {"ctx", "_ctx", "context", "dry_run"}
 _TL_ATTRS = ("format_", "start_ms", "timeout_ms", "warnings", "pagination", "request_id")
+
+
+def _build_routing_table(
+    app: Agentyper, prefix: str = "", _out: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Walk the app hierarchy and return a flat routing table of all dispatchable commands."""
+    if _out is None:
+        _out = {}
+    for name, info in app._commands.items():
+        _out[f"{prefix}{name}"] = {"description": info.help, "mutating": info.mutating}
+    for sub_name, sub_app in app._sub_apps.items():
+        _build_routing_table(sub_app, f"{prefix}{sub_name}.", _out)
+    return _out
+
+
+def get_exec_schema(app: Agentyper, cmd_path: str | None) -> dict[str, Any] | None:
+    """Return routing table (cmd_path=None), full schema for a command, or None if not found."""
+    if not cmd_path:
+        return _build_routing_table(app)
+    cmd_info = _resolve_cmd_info(app, cmd_path.split("."))
+    return fn_to_input_schema(cmd_info.fn) if cmd_info is not None else None
 
 
 def _resolve_cmd_info(app: Agentyper, parts: list[str]) -> CommandInfo | None:

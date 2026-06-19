@@ -248,16 +248,25 @@ def _extract_global_flags_schema(
 
 
 class _SchemaPrintAction(argparse.Action):
-    """Intercepts --schema before argument validation and prints JSON Schema."""
+    """Intercepts --schema before argument validation and prints JSON Schema.
+
+    Supports two modes controlled by ``nargs``:
+    - ``nargs=0`` (default): calls ``schema_fn()`` with no argument.
+    - ``nargs="?"``: calls ``schema_fn(values)`` where *values* is ``None`` or a
+      command-path string.  ``schema_fn`` returns ``None`` when the path is unknown;
+      this is converted to a ``parser.error``.
+    """
 
     def __init__(
         self,
         option_strings: list[str],
         dest: str,
-        schema_fn: Callable[[], dict[str, Any]],
+        schema_fn: Callable,
         **kwargs: Any,
     ) -> None:
-        super().__init__(option_strings, dest, nargs=0, default=argparse.SUPPRESS, **kwargs)
+        kwargs.setdefault("nargs", 0)
+        kwargs.setdefault("default", argparse.SUPPRESS)
+        super().__init__(option_strings, dest, **kwargs)
         self._schema_fn = schema_fn
 
     def __call__(
@@ -267,7 +276,10 @@ class _SchemaPrintAction(argparse.Action):
         values: Any,
         option_string: str | None = None,
     ) -> None:
-        print(json.dumps(self._schema_fn(), indent=2))
+        result = self._schema_fn(values)
+        if result is None:
+            parser.error(f"--schema: unknown command path {values!r}")
+        print(json.dumps(result, indent=2))
         parser.exit(EXIT_SUCCESS)
 
 
@@ -712,6 +724,7 @@ class Agentyper:
         """Register the built-in ``exec`` subcommand on *subparsers*."""
         exec_parser = subparsers.add_parser(
             "exec",
+            prog=f"{self.name} exec",
             help="Read JSONL from stdin and dispatch each line to a subcommand",
             description=(
                 "Read a JSONL stream from stdin and dispatch each line to the\n"
@@ -729,22 +742,20 @@ class Agentyper:
         )
         self._inject_global_flags(
             exec_parser,
-            schema_fn=lambda: {
-                "type": "object",
-                "properties": {
-                    "ignore_errors": {
-                        "type": "boolean",
-                        "description": "Continue after a line error instead of stopping",
-                    },
-                    "dry_run": {
-                        "type": "boolean",
-                        "description": "Forward --dry-run to each dispatched mutating command",
-                    },
-                },
-            },
             include_interaction=False,
             include_timeout=False,
             suppress_defaults=True,
+        )
+
+        from agentyper._internal._exec import get_exec_schema  # noqa: PLC0415
+
+        exec_parser.add_argument(
+            "--schema",
+            action=_SchemaPrintAction,
+            schema_fn=lambda v: get_exec_schema(self, v),
+            nargs="?",
+            metavar="CMD_PATH",
+            help="Print routing table of all commands (or full schema for CMD_PATH)",
         )
         exec_parser.add_argument(
             "--ignore-errors",
@@ -765,7 +776,7 @@ class Agentyper:
     def _inject_global_flags(
         self,
         parser: argparse.ArgumentParser,
-        schema_fn: Callable[[], dict[str, Any]],
+        schema_fn: Callable[[], dict[str, Any]] | None = None,
         *,
         include_interaction: bool = True,
         include_timeout: bool = True,
@@ -786,13 +797,14 @@ class Agentyper:
             help="Show all flags including hidden ones",
         )
 
-        # --schema (eager)
-        parser.add_argument(
-            "--schema",
-            action=_SchemaPrintAction,
-            schema_fn=schema_fn,
-            help="Print command JSON Schema and exit",
-        )
+        # --schema (eager); omitted when caller registers its own variant (pass schema_fn=None)
+        if schema_fn is not None:
+            parser.add_argument(
+                "--schema",
+                action=_SchemaPrintAction,
+                schema_fn=lambda v: schema_fn(),
+                help="Print command JSON Schema and exit",
+            )
 
         # --output (REQ-O-001) + --format backward-compat alias + --json shorthand (REQ-F-003)
         default_format = "table" if (sys.stdout.isatty() and not _is_ci()) else "json"
@@ -1143,6 +1155,8 @@ class Agentyper:
 
             # Built-in exec command
             if getattr(ns, "_is_exec", False):
+                if sys.stdin.isatty():
+                    exit_error("reads JSONL from stdin", code=ExitCode.ARG_ERROR)
                 from agentyper._internal._exec import run_exec  # noqa: PLC0415
 
                 run_exec(
