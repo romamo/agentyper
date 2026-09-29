@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`@app.command(default_format=...)`**: a command whose natural output is text (e.g. a file format) can default to `"plain"` off a terminal. Precedence: `--format`, then `AGENTYPER_FORMAT`, then the command default, then `json` off a TTY / `table` on one
+
 ### Changed
 - **Failure envelope on stdout in `--format json`**: `exit_error` and pydantic validation errors now write `{"ok": false, "data": null, "error": {...}, "warnings": [...], "meta": {...}}` to stdout, the same shape as a success response, plus a one-line `Error: <message>` on stderr. `error` carries `code` (the exit-code name, e.g. `ARG_ERROR`), `message`, `type`, `exit_code`, `retryable`, `side_effects`, and `phase`, `field`, `constraint`, `hint`, `errors` when they apply. Consumers that read the old `{"error": true, ...}` object from stderr under `--format json` must read stdout instead; other formats keep the stderr object
 - **`exit_error` follows the active `--format`**: `format_` now defaults to the format of the running command instead of `"table"`, so handlers no longer need to pass it

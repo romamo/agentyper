@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
+import os
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 import agentyper
+from agentyper._internal._app import _effective_format
 from agentyper.testing import CliRunner, Result
 
 runner = CliRunner()
@@ -1156,3 +1161,39 @@ class TestDelimitedCells:
         lines = result.stdout.strip().splitlines()
         assert lines[0] == "id,tags,px,n"
         assert lines[1] == 'a,"[""x"",""y""]","{""v"":1}",'
+
+
+class TestDefaultFormat:
+    @staticmethod
+    def _app() -> agentyper.Agentyper:
+        app = agentyper.Agentyper(name="t")
+
+        @app.command(default_format="plain")
+        def render(ctx: agentyper.Context) -> None:
+            """Text-first command."""
+            if ctx.format == "json":
+                agentyper.output({"text": "hello"})
+            else:
+                print("hello")
+
+        return app
+
+    @pytest.mark.skipif("AGENTYPER_FORMAT" in os.environ, reason="env overrides the default")
+    def test_command_default_applies_off_tty(self) -> None:
+        result = runner.invoke(self._app(), ["render"])
+        assert result.stdout == "hello\n"
+
+    def test_explicit_format_wins(self) -> None:
+        result = runner.invoke(self._app(), ["render", "--format", "json"])
+        assert json.loads(result.stdout)["data"] == {"text": "hello"}
+
+    def test_env_beats_command_default(self) -> None:
+        ns = argparse.Namespace(format=None)
+        assert _effective_format(ns, "plain", env={"AGENTYPER_FORMAT": "json"}) == "json"
+        assert _effective_format(ns, "plain", env={}) == "plain"
+        assert _effective_format(argparse.Namespace(format="csv"), "plain", env={}) == "csv"
+
+    def test_invalid_default_format_rejected(self) -> None:
+        app = agentyper.Agentyper(name="t")
+        with pytest.raises(ValueError, match="default_format"):
+            app.command(default_format="xml")

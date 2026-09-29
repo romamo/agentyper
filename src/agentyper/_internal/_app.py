@@ -125,6 +125,7 @@ class CommandInfo:
     non_interactive_alternatives: list[str] = dataclasses.field(default_factory=list)
     interactive: bool | None = None  # None = auto-detect from handler body
     timeout_ms: int | None = None  # None = inherit from app default
+    default_format: str | None = None  # None = json off a TTY, table on one
 
     def __post_init__(self) -> None:
         if not self.exit_codes:
@@ -133,6 +134,23 @@ class CommandInfo:
 
 def _is_ci() -> bool:
     return bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("JENKINS_URL"))
+
+
+def _effective_format(
+    ns: argparse.Namespace,
+    cmd_default: str | None = None,
+    env: collections.abc.Mapping[str, str] = os.environ,
+) -> str:
+    """``--format`` if given, else ``AGENTYPER_FORMAT``, else the command's default, else by TTY."""
+    explicit = getattr(ns, "format", None)
+    if explicit:
+        return explicit
+    env_format = env.get("AGENTYPER_FORMAT")
+    if env_format:
+        return env_format
+    if cmd_default:
+        return cmd_default
+    return "table" if (sys.stdout.isatty() and not _is_ci()) else "json"
 
 
 # ---------------------------------------------------------------------------
@@ -487,6 +505,7 @@ class Agentyper:
         non_interactive_alternatives: list[str] | None = None,
         interactive: bool | None = None,
         timeout_ms: int | None = None,
+        default_format: str | None = None,
     ) -> Callable:
         """
         Register a function as a CLI subcommand.
@@ -503,7 +522,14 @@ class Agentyper:
             requires_editor:              True if the command opens ``$EDITOR`` (REQ-C-023).
             non_interactive_alternatives: Flag names that bypass the editor (REQ-C-023),
                                           e.g. ``["message", "from-file"]``.
+            default_format:               Format used when neither ``--format`` nor
+                                          ``AGENTYPER_FORMAT`` is given, e.g. ``"plain"``
+                                          for a command whose natural output is text.
         """
+        if default_format is not None and default_format not in OUTPUT_FORMATS:
+            raise ValueError(
+                f"default_format must be one of {OUTPUT_FORMATS}, got {default_format!r}"
+            )
 
         def decorator(fn: Callable) -> Callable:
             cmd_name = name or fn.__name__.rstrip("_").replace("_", "-")
@@ -520,6 +546,7 @@ class Agentyper:
                 non_interactive_alternatives=non_interactive_alternatives or [],
                 interactive=interactive,
                 timeout_ms=timeout_ms,
+                default_format=default_format,
             )
             return fn
 
@@ -807,13 +834,12 @@ class Agentyper:
             )
 
         # --output (REQ-O-001) + --format backward-compat alias + --json shorthand (REQ-F-003)
-        default_format = "table" if (sys.stdout.isatty() and not _is_ci()) else "json"
-        env_format = os.getenv("AGENTYPER_FORMAT", default_format)
+        # No default: _effective_format() resolves env, per-command default, and TTY.
         parser.add_argument(
             "--output",
             "-o",
             choices=OUTPUT_FORMATS,
-            default=argparse.SUPPRESS if suppress_defaults else env_format,
+            default=argparse.SUPPRESS if suppress_defaults else None,
             dest="format",
             metavar="FORMAT",
             help="Output format: json (default in non-TTY), jsonl, tsv, plain, table",
@@ -1125,7 +1151,7 @@ class Agentyper:
         )
         set_session(session)
 
-        format_ = getattr(ns, "format", "table")
+        format_ = _effective_format(ns, cmd_info.default_format if cmd_info else None)
         set_format(format_)
         set_start_time()
         clear_warnings()
@@ -1264,7 +1290,7 @@ def run(
     )
     set_session(session)
 
-    format_ = getattr(ns, "format", "table")
+    format_ = _effective_format(ns)
     set_format(format_)
     set_start_time()
     clear_warnings()
