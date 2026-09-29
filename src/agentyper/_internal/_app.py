@@ -1094,6 +1094,7 @@ class Agentyper:
     def __call__(self, args: list[str] | None = None) -> None:
         """Parse arguments and dispatch to the appropriate command."""
         parser = self._build_parser()
+        set_format("table")  # parse errors predate --format; don't inherit a previous run's
         ns, extra_args = parser.parse_known_args(args)
         if extra_args and not getattr(ns, "_is_exec", False):
             parser.error(f"unrecognized arguments: {' '.join(extra_args)}")
@@ -1252,6 +1253,7 @@ def run(
     )
     app._add_fn_params(parser, fn)
 
+    set_format("table")  # parse errors predate --format; don't inherit a previous run's
     ns = parser.parse_args(args)
     configure_logging(getattr(ns, "verbose", 0))
 

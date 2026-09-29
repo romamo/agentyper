@@ -277,6 +277,37 @@ def _render_table(records: list[dict[str, Any]], title: str) -> None:
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MiB (REQ-F-052)
 
 
+def _build_meta(warnings: list[Any]) -> dict[str, Any]:
+    """Build the envelope ``meta`` block shared by success and failure responses."""
+    meta: dict[str, Any] = {
+        "request_id": getattr(_local, "request_id", None),
+        "duration_ms": _get_duration_ms(),
+    }
+    if any(isinstance(w, dict) and w.get("code") == "FIELD_TRUNCATED" for w in warnings):
+        meta["truncated"] = True  # REQ-F-064
+    timeout_ms = _get_timeout_ms()
+    if timeout_ms is not None:
+        meta["timeout_ms"] = timeout_ms  # REQ-F-011
+    return meta
+
+
+def render_error_envelope(error: dict[str, Any]) -> None:
+    """Write a failure envelope to stdout: ``ok: false``, ``data: null``, the ``error`` object.
+
+    Same shape as a success response, so a ``--format json`` consumer reads one line of
+    stdout either way and branches on ``ok``.
+    """
+    warnings = _get_warnings()
+    envelope: dict[str, Any] = {
+        "ok": False,
+        "data": None,
+        "error": _strip_ansi_deep(error),
+        "warnings": warnings,
+        "meta": _build_meta(warnings),
+    }
+    print(json.dumps(envelope, default=_default_json, indent=2, ensure_ascii=False))
+
+
 def _render_json(records: list[dict[str, Any]], *, single: bool) -> None:
     """Render JSON to stdout wrapped in the standard ok/data/error/warnings/meta envelope.
 
@@ -286,18 +317,7 @@ def _render_json(records: list[dict[str, Any]], *, single: bool) -> None:
     output_data: Any = records[0] if single else records
     output_data = _strip_ansi_deep(output_data)  # REQ-F-007
     warnings = _get_warnings()
-    has_truncation = any(
-        isinstance(w, dict) and w.get("code") == "FIELD_TRUNCATED" for w in warnings
-    )
-    meta: dict[str, Any] = {
-        "request_id": getattr(_local, "request_id", None),
-        "duration_ms": _get_duration_ms(),
-    }
-    if has_truncation:
-        meta["truncated"] = True  # REQ-F-064
-    timeout_ms = _get_timeout_ms()
-    if timeout_ms is not None:
-        meta["timeout_ms"] = timeout_ms  # REQ-F-011
+    meta = _build_meta(warnings)
 
     envelope: dict[str, Any] = {
         "ok": True,
@@ -348,6 +368,19 @@ def _render_jsonl(records: list[dict[str, Any]]) -> None:
         print(json.dumps(clean, default=_default_json, ensure_ascii=False))
 
 
+def _cell(value: Any) -> str:
+    """One delimited-output field: nested values as compact JSON, ``None`` as empty."""
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, default=_default_json, ensure_ascii=False, separators=(",", ":"))
+    if hasattr(value, "model_dump"):
+        return json.dumps(
+            _to_dict(value), default=_default_json, ensure_ascii=False, separators=(",", ":")
+        )
+    return str(value)
+
+
 def _render_delimited(records: list[dict[str, Any]], *, delimiter: str) -> None:
     """Render delimiter-separated values to stdout with a header row."""
     if not records:
@@ -357,7 +390,7 @@ def _render_delimited(records: list[dict[str, Any]], *, delimiter: str) -> None:
         buf, fieldnames=list(records[0].keys()), extrasaction="ignore", delimiter=delimiter
     )
     writer.writeheader()
-    writer.writerows({k: ("" if v is None else str(v)) for k, v in r.items()} for r in records)
+    writer.writerows({k: _cell(v) for k, v in r.items()} for r in records)
     sys.stdout.write(buf.getvalue())
 
 

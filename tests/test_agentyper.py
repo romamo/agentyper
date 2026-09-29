@@ -1080,3 +1080,79 @@ class TestExecCommand:
         app = _make_exec_app()
         res = runner.invoke(app, ["exec", "--schema", "no.such.cmd"])
         assert res.exit_code == 2
+
+
+# ---------------------------------------------------------------------------
+# Failure envelope and delimited cells
+# ---------------------------------------------------------------------------
+
+
+class TestFailureEnvelope:
+    def test_exit_error_json_writes_envelope_to_stdout(self) -> None:
+        app = agentyper.Agentyper(name="t")
+
+        @app.command()
+        def bad() -> None:
+            """Always fails validation."""
+            agentyper.exit_error("bad input", code=agentyper.EXIT_VALIDATION, hint="try x")
+
+        result = runner.invoke(app, ["bad", "--format", "json"])
+        assert result.exit_code == agentyper.EXIT_VALIDATION
+        envelope = json.loads(result.stdout)
+        assert envelope["ok"] is False
+        assert envelope["data"] is None
+        assert envelope["error"]["code"] == "ARG_ERROR"
+        assert envelope["error"]["message"] == "bad input"
+        assert envelope["error"]["retryable"] is True
+        assert envelope["error"]["phase"] == "validation"
+        assert envelope["error"]["hint"] == "try x"
+        assert "duration_ms" in envelope["meta"]
+        assert "bad input" in result.stderr
+
+    def test_exit_error_system_code_name(self) -> None:
+        app = agentyper.Agentyper(name="t")
+
+        @app.command()
+        def fail() -> None:
+            """System failure."""
+            agentyper.exit_error("db down", code=agentyper.EXIT_SYSTEM)
+
+        result = runner.invoke(app, ["fail", "--format", "json"])
+        envelope = json.loads(result.stdout)
+        assert envelope["error"]["code"] == "GENERAL_ERROR"
+        assert envelope["error"]["exit_code"] == agentyper.EXIT_SYSTEM
+        assert "phase" not in envelope["error"]
+
+    def test_exit_error_non_json_keeps_stdout_empty(self) -> None:
+        app = agentyper.Agentyper(name="t")
+
+        @app.command()
+        def fail() -> None:
+            """System failure."""
+            agentyper.exit_error("db down", code=agentyper.EXIT_SYSTEM)
+
+        result = runner.invoke(app, ["fail", "--format", "jsonl"])
+        assert result.stdout == ""
+        assert json.loads(result.stderr)["message"] == "db down"
+
+    def test_parse_error_ignores_previous_run_format(self) -> None:
+        app = make_search_app()
+        runner.invoke(app, ["search", "AAPL", "--format", "json"])
+        result = runner.invoke(app, ["search", "--bogus"])
+        assert result.exit_code == agentyper.EXIT_VALIDATION
+        assert result.stdout == ""
+
+
+class TestDelimitedCells:
+    def test_csv_nested_values_are_json(self) -> None:
+        app = agentyper.Agentyper(name="t")
+
+        @app.command()
+        def rows() -> None:
+            """Nested rows."""
+            agentyper.output([{"id": "a", "tags": ["x", "y"], "px": {"v": 1}, "n": None}])
+
+        result = runner.invoke(app, ["rows", "--format", "csv"])
+        lines = result.stdout.strip().splitlines()
+        assert lines[0] == "id,tags,px,n"
+        assert lines[1] == 'a,"[""x"",""y""]","{""v"":1}",'

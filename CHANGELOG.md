@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Failure envelope on stdout in `--format json`**: `exit_error` and pydantic validation errors now write `{"ok": false, "data": null, "error": {...}, "warnings": [...], "meta": {...}}` to stdout, the same shape as a success response, plus a one-line `Error: <message>` on stderr. `error` carries `code` (the exit-code name, e.g. `ARG_ERROR`), `message`, `type`, `exit_code`, `retryable`, `side_effects`, and `phase`, `field`, `constraint`, `hint`, `errors` when they apply. Consumers that read the old `{"error": true, ...}` object from stderr under `--format json` must read stdout instead; other formats keep the stderr object
+- **`exit_error` follows the active `--format`**: `format_` now defaults to the format of the running command instead of `"table"`, so handlers no longer need to pass it
+
+### Fixed
+- **CSV/TSV nested values**: lists, dicts, and models are written as compact JSON instead of Python `repr` (`["x","y"]`, not `['x', 'y']`)
+- **Parse errors ignore a previous run's format**: the format is reset before argument parsing, so an in-process runner no longer reports a parse error in the prior command's format
+
 ## [0.1.21] - 2026-09-29
 
 ### Fixed

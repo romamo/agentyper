@@ -199,6 +199,37 @@ _err_console = Console(stderr=True)
 # ---------------------------------------------------------------------------
 
 
+def _active_format(format_: str | None) -> str:
+    from agentyper._internal._output import _get_format  # noqa: PLC0415
+
+    return format_ or _get_format()
+
+
+def _error_object(code: int, message: str, error_type: str) -> dict[str, object]:
+    """The envelope ``error`` object: stable code name, message, and retry semantics."""
+    entry = EXIT_CODE_TABLE.get(int(code))
+    error: dict[str, object] = {
+        "code": entry.name if entry else "COMMAND_ERROR",
+        "message": message,
+        "type": error_type,
+        "exit_code": int(code),
+    }
+    if entry is not None:
+        error["retryable"] = entry.retryable
+        error["side_effects"] = entry.side_effects
+    if int(code) == ExitCode.ARG_ERROR:
+        error["phase"] = "validation"
+    return error
+
+
+def _write_error_envelope(error: dict[str, object], message: str) -> None:
+    """``--format json``: failure envelope on stdout, one human line on stderr."""
+    from agentyper._internal._output import render_error_envelope  # noqa: PLC0415
+
+    render_error_envelope(error)
+    print(f"Error: {message}", file=sys.stderr)
+
+
 def exit_error(
     message: str,
     *,
@@ -207,13 +238,15 @@ def exit_error(
     error_type: str = "Error",
     constraint: str | None = None,
     hint: str | None = None,
-    format_: str = "table",
+    format_: str | None = None,
 ) -> NoReturn:
     """
     Print a structured error and exit with the given code.
 
-    In JSON mode (non-TTY or --format json), emits a JSON object to stderr.
-    In table mode, emits a Rich-formatted error message to stderr.
+    With ``--format json``, writes the failure envelope (``ok: false``, ``data: null``,
+    ``error: {code, message, ...}``) to stdout and a one-line message to stderr.
+    In other formats off a terminal, emits a JSON object to stderr; on a terminal,
+    a Rich-formatted message to stderr.
 
     Args:
         message:    Human-readable error message.
@@ -222,9 +255,19 @@ def exit_error(
         error_type: Short error category name.
         constraint: The violated constraint (e.g. "pattern: ^[A-Z]+$").
         hint:       Actionable suggestion for the caller (included in JSON errors).
-        format_:    Output format context ("json" emits JSON; else Rich text).
+        format_:    Output format override; defaults to the active ``--format``.
     """
-    if format_ == "json" or not sys.stderr.isatty():
+    fmt = _active_format(format_)
+    if fmt == "json":
+        error = _error_object(code, message, error_type)
+        if field is not None:
+            error["field"] = field
+        if constraint is not None:
+            error["constraint"] = constraint
+        if hint is not None:
+            error["hint"] = hint
+        _write_error_envelope(error, message)
+    elif not sys.stderr.isatty():
         payload: dict[str, object] = {
             "error": True,
             "error_type": error_type,
@@ -253,7 +296,7 @@ def exit_error(
     sys.exit(int(code))
 
 
-def format_pydantic_error(exc: object, format_: str = "table") -> NoReturn:
+def format_pydantic_error(exc: object, format_: str | None = None) -> NoReturn:
     """
     Serialize a Pydantic ValidationError to a structured error and exit ARG_ERROR (2).
 
@@ -272,21 +315,29 @@ def format_pydantic_error(exc: object, format_: str = "table") -> NoReturn:
         exit_error(str(exc), code=ExitCode.ARG_ERROR, format_=format_)
 
     _code = int(ExitCode.ARG_ERROR)
-    if format_ == "json" or not sys.stderr.isatty():
+    details = [
+        {
+            "field": ".".join(str(loc) for loc in e["loc"]) if e["loc"] else None,
+            "message": e["msg"],
+            "type": e["type"],
+            **({} if "ctx" not in e else {"constraint": str(e["ctx"])}),
+        }
+        for e in errors
+    ]
+    fmt = _active_format(format_)
+    if fmt == "json":
+        message = f"{len(details)} validation error(s)"
+        error = _error_object(_code, message, "ValidationError")
+        error["errors"] = details
+        _write_error_envelope(error, message)
+        sys.exit(_code)
+    if not sys.stderr.isatty():
         payload = {
             "error": True,
             "error_type": "ValidationError",
             "exit_code": _code,
             "phase": "validation",
-            "errors": [
-                {
-                    "field": ".".join(str(loc) for loc in e["loc"]) if e["loc"] else None,
-                    "message": e["msg"],
-                    "type": e["type"],
-                    **({} if "ctx" not in e else {"constraint": str(e["ctx"])}),
-                }
-                for e in errors
-            ],
+            "errors": details,
         }
         print(json.dumps(payload), file=sys.stderr)
         sys.exit(_code)
