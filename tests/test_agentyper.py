@@ -105,6 +105,26 @@ class TestOutputFormat:
         assert isinstance(data, list)
         assert data[0]["ticker"] == "AAPL"
 
+    def test_json_one_item_list_stays_list(self) -> None:
+        app = make_search_app()
+        result = runner.invoke(app, ["search", "AAPL", "--limit", "1", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)["data"]
+        assert data == [{"ticker": "AAPL", "price": 178.50}]
+
+    def test_json_single_dict_stays_object(self) -> None:
+        app = agentyper.Agentyper(name="test-tool", version="0.1.0")
+
+        @app.command()
+        def show(ticker: str):
+            """Show one security."""
+            agentyper.output({"ticker": ticker, "price": 178.50})
+
+        result = runner.invoke(app, ["show", "AAPL", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.stdout)["data"]
+        assert data == {"ticker": "AAPL", "price": 178.50}
+
     def test_csv_format(self) -> None:
         app = make_search_app()
         result = runner.invoke(app, ["search", "AAPL", "--format", "csv"])

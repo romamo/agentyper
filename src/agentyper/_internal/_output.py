@@ -244,15 +244,15 @@ def _to_dict(record: Any) -> dict[str, Any]:
     raise TypeError(f"Cannot convert {type(record)} to dict")
 
 
-def _normalise(data: Any) -> list[dict[str, Any]]:
-    """Return a consistent list[dict] regardless of input shape."""
+def _normalise(data: Any) -> tuple[list[dict[str, Any]], bool]:
+    """Return a consistent list[dict] and whether ``data`` was a single record."""
     if isinstance(data, dict) or hasattr(data, "model_dump"):
-        return [_to_dict(data)]
+        return [_to_dict(data)], True
     try:
         records = list(data)
     except TypeError:
-        records = [data]
-    return [_to_dict(r) for r in records]
+        return [_to_dict(data)], True
+    return [_to_dict(r) for r in records], False
 
 
 # ---------------------------------------------------------------------------
@@ -277,9 +277,13 @@ def _render_table(records: list[dict[str, Any]], title: str) -> None:
 _DEFAULT_MAX_OUTPUT_BYTES = 1_048_576  # 1 MiB (REQ-F-052)
 
 
-def _render_json(records: list[dict[str, Any]]) -> None:
-    """Render JSON to stdout wrapped in the standard ok/data/error/warnings/meta envelope."""
-    output_data = records if len(records) != 1 else records[0]
+def _render_json(records: list[dict[str, Any]], *, single: bool) -> None:
+    """Render JSON to stdout wrapped in the standard ok/data/error/warnings/meta envelope.
+
+    ``data`` keeps the caller's shape: an object for a single record, an array for an
+    iterable, even when it holds exactly one item.
+    """
+    output_data: Any = records[0] if single else records
     output_data = _strip_ansi_deep(output_data)  # REQ-F-007
     warnings = _get_warnings()
     has_truncation = any(
@@ -385,10 +389,10 @@ def render_output(
                  or ``"table"`` (default in TTY).
         title:   Optional table title (only shown in table/plain mode).
     """
-    records = _normalise(data)
+    records, single = _normalise(data)
 
     if format_ == "json":
-        _render_json(records)
+        _render_json(records, single=single)
     elif format_ == "jsonl":
         _render_jsonl(records)
     elif format_ == "csv":

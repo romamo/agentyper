@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **`--format json` keeps a one-item list as a list**: `output([record])` now yields `"data": [{...}]` instead of unwrapping it to `"data": {...}`. A single dict or model still renders as an object. Callers that relied on the unwrap must read `data[0]`.
+
 ## [0.1.20] - 2026-06-19
 
 ### Added
