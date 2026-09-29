@@ -37,7 +37,7 @@ Typer migration (one line change)::
 
 from __future__ import annotations
 
-__version__ = "0.1.20"
+__version__ = "0.1.21"
 
 # Core app
 from agentyper._internal._app import (
