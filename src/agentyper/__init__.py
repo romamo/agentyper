@@ -41,7 +41,7 @@ from __future__ import annotations
 
 import warnings
 
-__version__ = "0.1.22"
+__version__ = "0.1.23"
 
 # Core app
 from agentyper._internal._app import (
