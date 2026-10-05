@@ -1,6 +1,12 @@
 # Why Agentyper?
 
-# Why Agentyper?
+> [!WARNING]
+> **agentyper is retired.** It gets no new features or fixes. Its successor is
+> **[treaty](https://github.com/romamo/treaty)** (`pip install treaty`, Python 3.14+), a zero-dependency CLI
+> framework that implements the CLI Agent Spec with manifests, response envelopes, and typed exit
+> codes. Coming from agentyper's Typer-style API, start with
+> [Migrate a click or typer CLI](https://github.com/romamo/treaty/blob/main/docs/tutorial/B-migrate/click-typer.md).
+> Existing releases stay on PyPI, so pinned projects keep working.
 
 ## The Problem
 Typer revolutionized CLI development by elegantly using type hints. However, because it is built on `Click` and `Rich`, it is fundamentally optimized for human eyeballs. 

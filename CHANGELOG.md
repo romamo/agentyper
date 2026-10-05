@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Deprecated
+- **agentyper is retired**: no new features or fixes. Its successor is [treaty](https://github.com/romamo/treaty) (`pip install treaty`, Python 3.14+); migrate with its [click/typer guide](https://github.com/romamo/treaty/blob/main/docs/tutorial/B-migrate/click-typer.md). `import agentyper` now emits a `DeprecationWarning`, and the package metadata is marked `Development Status :: 7 - Inactive`
+
 ## [0.1.22] - 2026-09-29
 
 ### Added

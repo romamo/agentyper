@@ -1,7 +1,7 @@
 [project]
 name = "agentyper"
 version = "0.1.22"
-description = "Agent-first Python CLI library — Typer-compatible, built on argparse + pydantic"
+description = "Retired, use treaty instead. Agent-first Python CLI library — Typer-compatible, built on argparse + pydantic"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -10,7 +10,7 @@ authors = [
 license = { text = "MIT" }
 keywords = ["cli", "agent", "ai", "pydantic", "argparse", "typer"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 7 - Inactive",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Topic :: Software Development :: Libraries :: Python Modules",

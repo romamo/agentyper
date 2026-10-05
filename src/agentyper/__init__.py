@@ -1,6 +1,8 @@
 """
 agentyper — Agent-first Python CLI library.
 
+Retired: no new features or fixes. Use treaty instead: https://github.com/romamo/treaty
+
 Typer-compatible API built on argparse + pydantic.
 
 Quick start (single function)::
@@ -36,6 +38,8 @@ Typer migration (one line change)::
 """
 
 from __future__ import annotations
+
+import warnings
 
 __version__ = "0.1.22"
 
@@ -146,3 +150,10 @@ __all__ = [
     # Version
     "__version__",
 ]
+
+warnings.warn(
+    "agentyper is retired and gets no further fixes; migrate to treaty "
+    "(https://github.com/romamo/treaty)",
+    DeprecationWarning,
+    stacklevel=2,
+)

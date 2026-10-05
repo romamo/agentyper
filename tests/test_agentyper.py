@@ -6,6 +6,8 @@ import argparse
 import io
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1197,3 +1199,13 @@ class TestDefaultFormat:
         app = agentyper.Agentyper(name="t")
         with pytest.raises(ValueError, match="default_format"):
             app.command(default_format="xml")
+
+
+def test_import_warns_retired() -> None:
+    proc = subprocess.run(
+        [sys.executable, "-W", "error::DeprecationWarning", "-c", "import agentyper"],
+        capture_output=True,
+        text=True,
+    )
+    assert proc.returncode == 1
+    assert "agentyper is retired" in proc.stderr
